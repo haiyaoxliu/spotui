@@ -1,0 +1,210 @@
+use std::fs;
+use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::PathBuf;
+
+use anyhow::{Context, Result, anyhow};
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
+
+const CONFIG_TEMPLATE: &str = r#"# spotui config
+# Get a client ID at https://developer.spotify.com/dashboard
+# In your Spotify app settings, register this exact redirect URI:
+#   http://127.0.0.1:8888/callback
+client_id = "REPLACE_ME"
+
+# Loopback redirect port. Must match what is registered in your Spotify app.
+redirect_port = 8888
+
+# Substring matching the device name to prefer (empty = whichever is active).
+default_device = ""
+
+# How often to poll Spotify for now-playing state (ms).
+poll_ms = 1000
+"#;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub client_id: String,
+    #[serde(default = "default_port")]
+    pub redirect_port: u16,
+    #[serde(default)]
+    pub default_device: String,
+    #[serde(default = "default_poll_ms")]
+    pub poll_ms: u64,
+}
+
+fn default_port() -> u16 {
+    8888
+}
+fn default_poll_ms() -> u64 {
+    1000
+}
+
+impl Config {
+    pub fn redirect_uri(&self) -> String {
+        format!("http://127.0.0.1:{}/callback", self.redirect_port)
+    }
+}
+
+pub struct Paths {
+    pub config_file: PathBuf,
+    pub token_cache: PathBuf,
+    pub log_dir: PathBuf,
+    pub cache_root: PathBuf,
+}
+
+impl Paths {
+    pub fn resolve() -> Result<Self> {
+        let dirs = ProjectDirs::from("", "", "spotui")
+            .ok_or_else(|| anyhow!("could not resolve user directories"))?;
+        let config_dir = dirs.config_dir().to_path_buf();
+        let cache_dir = dirs.cache_dir().to_path_buf();
+        let log_dir = dirs.data_local_dir().join("log");
+        Ok(Self {
+            config_file: config_dir.join("config.toml"),
+            token_cache: config_dir.join("token.json"),
+            cache_root: cache_dir,
+            log_dir,
+        })
+    }
+}
+
+/// Load the config, prompting interactively for `client_id` on first run when
+/// stdin is a TTY. Falls back to writing a template + erroring out for the
+/// non-interactive case (CI, redirected stdin).
+pub fn load_or_create(paths: &Paths) -> Result<Config> {
+    if !paths.config_file.exists() {
+        if io::stdin().is_terminal() {
+            return interactive_first_run(paths);
+        }
+        write_template(paths)?;
+        return Err(anyhow!(
+            "Wrote a config template to {}.\nEdit it and set client_id, then re-run.",
+            paths.config_file.display()
+        ));
+    }
+
+    let body = fs::read_to_string(&paths.config_file)
+        .with_context(|| format!("read {}", paths.config_file.display()))?;
+    let cfg: Config = toml::from_str(&body)
+        .with_context(|| format!("parse {}", paths.config_file.display()))?;
+
+    if needs_client_id(&cfg.client_id) {
+        if io::stdin().is_terminal() {
+            return interactive_fill_client_id(paths, cfg);
+        }
+        return Err(anyhow!(
+            "client_id is unset in {}.\nGet one at https://developer.spotify.com/dashboard.",
+            paths.config_file.display()
+        ));
+    }
+
+    Ok(cfg)
+}
+
+fn needs_client_id(s: &str) -> bool {
+    let t = s.trim();
+    t.is_empty() || t == "REPLACE_ME"
+}
+
+fn write_template(paths: &Paths) -> Result<()> {
+    if let Some(parent) = paths.config_file.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(&paths.config_file, CONFIG_TEMPLATE)
+        .with_context(|| format!("write {}", paths.config_file.display()))?;
+    Ok(())
+}
+
+/// First-run setup walk-through. Prints the dashboard steps the user has to
+/// do once, reads their client_id from stdin, and writes a fresh config.
+fn interactive_first_run(paths: &Paths) -> Result<Config> {
+    print_setup_banner();
+    let client_id = prompt_client_id()?;
+    let cfg = Config {
+        client_id,
+        redirect_port: default_port(),
+        default_device: String::new(),
+        poll_ms: default_poll_ms(),
+    };
+    write_config(paths, &cfg)?;
+    println!("Saved config to {}.\n", paths.config_file.display());
+    Ok(cfg)
+}
+
+/// Same UX as the first-run flow but the config file already exists with a
+/// missing/placeholder client_id (someone deleted token.json or the template
+/// wasn't filled in). Preserves whatever else is in the file.
+fn interactive_fill_client_id(paths: &Paths, mut cfg: Config) -> Result<Config> {
+    print_setup_banner();
+    cfg.client_id = prompt_client_id()?;
+    write_config(paths, &cfg)?;
+    println!("Updated {}.\n", paths.config_file.display());
+    Ok(cfg)
+}
+
+fn print_setup_banner() {
+    println!();
+    println!("=== spotui first-run setup ===");
+    println!();
+    println!("1. Open https://developer.spotify.com/dashboard and create an app.");
+    println!("2. In the app's Edit Settings:");
+    println!("     - Add this Redirect URI exactly:");
+    println!("         http://127.0.0.1:8888/callback");
+    println!("     - Under \"User Management\", add the email you sign in with");
+    println!("       (Spotify dev mode requires it).");
+    println!("3. Copy the app's Client ID and paste it below.");
+    println!();
+}
+
+fn prompt_client_id() -> Result<String> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    loop {
+        print!("Client ID: ");
+        stdout.flush().ok();
+        let mut line = String::new();
+        let n = stdin
+            .lock()
+            .read_line(&mut line)
+            .context("read client_id from stdin")?;
+        if n == 0 {
+            // EOF (e.g. piped stdin closed). Bail clearly.
+            return Err(anyhow!("no input on stdin during first-run setup"));
+        }
+        let id = line.trim();
+        if id.is_empty() {
+            println!("(empty — try again, or ctrl-c to abort)");
+            continue;
+        }
+        return Ok(id.to_string());
+    }
+}
+
+fn write_config(paths: &Paths, cfg: &Config) -> Result<()> {
+    if let Some(parent) = paths.config_file.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let body = toml::to_string_pretty(cfg).context("serialize config")?;
+    let tmp = paths.config_file.with_extension("toml.tmp");
+    fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
+    fs::rename(&tmp, &paths.config_file)
+        .with_context(|| format!("rename to {}", paths.config_file.display()))?;
+    Ok(())
+}
+
+pub fn ensure_dirs(paths: &Paths) -> Result<()> {
+    for dir in [
+        paths.config_file.parent(),
+        Some(paths.cache_root.as_path()),
+        Some(paths.log_dir.as_path()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !dir.exists() {
+            fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        }
+    }
+    Ok(())
+}

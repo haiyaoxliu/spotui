@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# Local environment
+.env
+.env.local

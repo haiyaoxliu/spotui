@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
+use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
 const CONFIG_TEMPLATE: &str = r#"# spotui config
@@ -31,6 +32,129 @@ pub struct Config {
     pub default_device: String,
     #[serde(default = "default_poll_ms")]
     pub poll_ms: u64,
+    #[serde(default)]
+    pub colors: ColorsConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ColorsConfig {
+    pub accent: Option<String>,
+    pub success: Option<String>,
+    pub warn: Option<String>,
+    pub dim: Option<String>,
+    pub highlight_fg: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Theme {
+    pub accent: Color,
+    pub success: Color,
+    pub warn: Color,
+    pub dim: Color,
+    /// Foreground color used on highlighted/selected rows where the background
+    /// is an accent (e.g. list cursor, search-result cursor, status mode chip).
+    /// Defaults to Black; flip to White if you pick a dark accent.
+    pub highlight_fg: Color,
+}
+
+impl Theme {
+    pub fn defaults() -> Self {
+        Self {
+            accent: Color::Cyan,
+            success: Color::Green,
+            warn: Color::Yellow,
+            dim: Color::DarkGray,
+            highlight_fg: Color::Black,
+        }
+    }
+
+    pub fn from_config(cc: &ColorsConfig) -> Self {
+        let d = Self::defaults();
+        Self {
+            accent: cc.accent.as_deref().and_then(parse_color).unwrap_or(d.accent),
+            success: cc
+                .success
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(d.success),
+            warn: cc.warn.as_deref().and_then(parse_color).unwrap_or(d.warn),
+            dim: cc.dim.as_deref().and_then(parse_color).unwrap_or(d.dim),
+            highlight_fg: cc
+                .highlight_fg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(d.highlight_fg),
+        }
+    }
+
+    pub fn to_config(self) -> ColorsConfig {
+        ColorsConfig {
+            accent: Some(color_to_string(self.accent)),
+            success: Some(color_to_string(self.success)),
+            warn: Some(color_to_string(self.warn)),
+            dim: Some(color_to_string(self.dim)),
+            highlight_fg: Some(color_to_string(self.highlight_fg)),
+        }
+    }
+}
+
+/// Parse a named color or `#rrggbb` hex. Returns None on garbage so callers
+/// can fall back to the default for that slot.
+pub fn parse_color(s: &str) -> Option<Color> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix('#') {
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some(Color::Rgb(r, g, b));
+        }
+        return None;
+    }
+    Some(match s.to_ascii_lowercase().as_str() {
+        "reset" => Color::Reset,
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "gray" | "grey" => Color::Gray,
+        "darkgray" | "darkgrey" => Color::DarkGray,
+        "lightred" => Color::LightRed,
+        "lightgreen" => Color::LightGreen,
+        "lightyellow" => Color::LightYellow,
+        "lightblue" => Color::LightBlue,
+        "lightmagenta" => Color::LightMagenta,
+        "lightcyan" => Color::LightCyan,
+        "white" => Color::White,
+        _ => return None,
+    })
+}
+
+pub fn color_to_string(c: Color) -> String {
+    match c {
+        Color::Reset => "reset".into(),
+        Color::Black => "black".into(),
+        Color::Red => "red".into(),
+        Color::Green => "green".into(),
+        Color::Yellow => "yellow".into(),
+        Color::Blue => "blue".into(),
+        Color::Magenta => "magenta".into(),
+        Color::Cyan => "cyan".into(),
+        Color::Gray => "gray".into(),
+        Color::DarkGray => "darkgray".into(),
+        Color::LightRed => "lightred".into(),
+        Color::LightGreen => "lightgreen".into(),
+        Color::LightYellow => "lightyellow".into(),
+        Color::LightBlue => "lightblue".into(),
+        Color::LightMagenta => "lightmagenta".into(),
+        Color::LightCyan => "lightcyan".into(),
+        Color::White => "white".into(),
+        Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
+        Color::Indexed(n) => format!("@{n}"),
+    }
 }
 
 fn default_port() -> u16 {
@@ -126,6 +250,7 @@ fn interactive_first_run(paths: &Paths) -> Result<Config> {
         redirect_port: default_port(),
         default_device: String::new(),
         poll_ms: default_poll_ms(),
+        colors: ColorsConfig::default(),
     };
     write_config(paths, &cfg)?;
     println!("Saved config to {}.\n", paths.config_file.display());
@@ -181,7 +306,7 @@ fn prompt_client_id() -> Result<String> {
     }
 }
 
-fn write_config(paths: &Paths, cfg: &Config) -> Result<()> {
+pub fn write_config(paths: &Paths, cfg: &Config) -> Result<()> {
     if let Some(parent) = paths.config_file.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }

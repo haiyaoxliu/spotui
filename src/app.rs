@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 
 
 use crate::cache::Cache;
+use crate::config::{self, Paths, Theme};
 use crate::spotify::{self, DeviceRef};
 use crate::ui;
 
@@ -30,6 +31,12 @@ pub enum Overlay {
         loading: bool,
     },
     Help,
+    Colors {
+        /// Index into the slot list (0 = accent, 1 = success, 2 = warn, 3 = dim).
+        slot: usize,
+        /// Theme captured when the picker opened, restored on Esc.
+        original: Theme,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,10 +158,17 @@ pub struct App {
     pub me_id: Option<String>,
 
     pub overlay: Overlay,
+
+    pub theme: Theme,
+    /// Full config kept around so the color picker can round-trip the file
+    /// (preserving fields it doesn't manage, like `default_device`).
+    pub cfg: config::Config,
+    pub paths: Arc<Paths>,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(cfg: config::Config, paths: Arc<Paths>) -> Self {
+        let theme = Theme::from_config(&cfg.colors);
         Self {
             focus: Pane::Library,
             last_focus: Pane::Library,
@@ -178,6 +192,9 @@ impl App {
             me_name: None,
             me_id: None,
             overlay: Overlay::None,
+            theme,
+            cfg,
+            paths,
         }
     }
 
@@ -226,7 +243,8 @@ enum Action {
 
 pub async fn run(
     spotify: AuthCodePkceSpotify,
-    poll_ms: u64,
+    cfg: config::Config,
+    paths: Paths,
     cache: Cache,
 ) -> Result<()> {
     enable_raw_mode().context("enable raw mode")?;
@@ -235,7 +253,7 @@ pub async fn run(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_inner(&mut terminal, spotify, poll_ms, cache).await;
+    let result = run_inner(&mut terminal, spotify, cfg, paths, cache).await;
 
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
@@ -246,9 +264,12 @@ pub async fn run(
 async fn run_inner(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     spotify: AuthCodePkceSpotify,
-    poll_ms: u64,
+    cfg: config::Config,
+    paths: Paths,
     cache: Cache,
 ) -> Result<()> {
+    let poll_ms = cfg.poll_ms;
+    let paths = Arc::new(paths);
     let cache = Arc::new(cache);
     let (tx, mut rx) = mpsc::unbounded_channel::<Action>();
 
@@ -302,7 +323,7 @@ async fn run_inner(
         }
     });
 
-    let mut app = App::new();
+    let mut app = App::new(cfg, paths);
 
     if let Some((age, cached)) = cache.load_playlists() {
         app.playlists = cached;
@@ -614,6 +635,7 @@ async fn handle_key(
         (Char('['), false) => seek_relative(app, spotify, tx, -5_000),
         (Char(']'), false) => seek_relative(app, spotify, tx, 5_000),
         (Char('d'), false) => open_devices_overlay(app, spotify, tx),
+        (Char('C'), false) => open_colors_overlay(app),
         (Char('?'), false) => app.overlay = Overlay::Help,
         // ←/→ scrubbing while Now Playing is focused (no cursor to fight with).
         (Left, _) if app.focus == Pane::NowPlaying => {
@@ -749,6 +771,62 @@ fn open_devices_overlay(
     });
 }
 
+fn open_colors_overlay(app: &mut App) {
+    app.overlay = Overlay::Colors {
+        slot: 0,
+        original: app.theme,
+    };
+}
+
+fn handle_colors_overlay_key(app: &mut App, key: KeyEvent) {
+    use KeyCode::*;
+    let Overlay::Colors { slot, original } = &mut app.overlay else {
+        return;
+    };
+    match key.code {
+        Esc => {
+            // Revert to the theme captured when the picker opened.
+            app.theme = *original;
+            app.overlay = Overlay::None;
+        }
+        Up | Char('k') => {
+            *slot = if *slot == 0 { ui::NUM_SLOTS - 1 } else { *slot - 1 };
+        }
+        Down | Char('j') => {
+            *slot = (*slot + 1) % ui::NUM_SLOTS;
+        }
+        Left | Char('h') => cycle_color(app, -1),
+        Right | Char('l') => cycle_color(app, 1),
+        Enter => {
+            // Persist the new theme to config.toml. Other overlay events have
+            // already mutated app.theme via the cycle.
+            app.cfg.colors = app.theme.to_config();
+            match config::write_config(&app.paths, &app.cfg) {
+                Ok(_) => {
+                    app.status = Some("colors saved".to_string());
+                }
+                Err(e) => {
+                    app.status = Some(format!("colors save: {e}"));
+                }
+            }
+            app.overlay = Overlay::None;
+        }
+        _ => {}
+    }
+}
+
+fn cycle_color(app: &mut App, delta: i32) {
+    let Overlay::Colors { slot, .. } = &app.overlay else {
+        return;
+    };
+    let slot = *slot;
+    let palette = ui::PICKER_PALETTE;
+    let cur = *ui::theme_slot_mut(&mut app.theme, slot);
+    let cur_idx = palette.iter().position(|c| *c == cur).unwrap_or(0) as i32;
+    let next_idx = (cur_idx + delta).rem_euclid(palette.len() as i32) as usize;
+    *ui::theme_slot_mut(&mut app.theme, slot) = palette[next_idx];
+}
+
 fn handle_overlay_key(
     app: &mut App,
     key: KeyEvent,
@@ -756,6 +834,14 @@ fn handle_overlay_key(
     tx: &mpsc::UnboundedSender<Action>,
 ) {
     use KeyCode::*;
+
+    // Color picker — its Esc reverts (rather than just closing), and its keymap
+    // is otherwise distinct from the device picker's, so handle it separately.
+    if matches!(app.overlay, Overlay::Colors { .. }) {
+        handle_colors_overlay_key(app, key);
+        return;
+    }
+
     if matches!(key.code, Esc) || matches!(key.code, Char('?')) {
         app.overlay = Overlay::None;
         return;

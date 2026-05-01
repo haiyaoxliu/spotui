@@ -75,6 +75,7 @@ The Client ID and refresh token are persisted at `~/Library/Application Support/
 | `+` / `-` | Volume +5 / -5 |
 | `R` | Reload library |
 | `d` | Device picker |
+| `shift-C` | Color picker |
 | `?` | Help overlay |
 | `tab` / `shift-tab` | Cycle panes |
 | `1`–`5` | Jump to pane |
@@ -118,6 +119,21 @@ The pane has two sub-focuses — input (the bar) and results (the list above).
 | `q` / `Q`     | Queue / play-now                      |
 | `a`           | Add to open playlist                  |
 | `/`           | Back to input                         |
+
+## Colors
+
+Press `shift-C` for a live-preview color picker; save with `enter`, revert with `esc`. The picker writes a `[colors]` section into `config.toml`:
+
+```toml
+[colors]
+accent       = "magenta"   # pane focus, highlights, artist names
+success      = "green"     # ▶ playing state, current track
+warn         = "yellow"    # key caps, ⚠ marker, help overlay
+dim          = "darkgray"  # secondary text (counts, durations, dates)
+highlight_fg = "black"     # text color on highlighted/selected rows; flip to "white" if you pick a dark accent
+```
+
+Values may be a named color (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `gray`, `darkgray`, `white`, plus the `light*` variants) or a `#rrggbb` hex string. Missing keys keep the defaults shown above.
 
 ## Files & paths
 

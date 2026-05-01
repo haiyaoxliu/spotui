@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
 use crate::app::{App, Overlay, Pane, Playback, SearchSubFocus};
+use crate::config::Theme;
 
 /// Cell width of the `highlight_symbol` prefix on every List row. The widget
 /// reserves this margin for ALL rows (selected and not) so columns stay aligned;
@@ -62,11 +63,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
 fn render_overlay(f: &mut Frame, area: Rect, app: &mut App) {
     let popup = centered_rect(60, 60, area);
     f.render_widget(Clear, popup);
+    let theme = app.theme;
     match &mut app.overlay {
         Overlay::None => {}
-        Overlay::Help => render_help(f, popup),
+        Overlay::Help => render_help(f, popup, &theme),
         Overlay::Devices { devices, state, loading } => {
-            render_devices(f, popup, devices, state, *loading);
+            render_devices(f, popup, devices, state, *loading, &theme);
+        }
+        Overlay::Colors { slot, .. } => {
+            render_colors(f, popup, *slot, &theme);
         }
     }
 }
@@ -77,27 +82,28 @@ fn render_devices(
     devices: &[crate::spotify::DeviceRef],
     state: &mut ratatui::widgets::ListState,
     loading: bool,
+    theme: &Theme,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
             " Devices — ↑/↓ choose, enter transfer, esc cancel ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ));
     if loading {
         let p = Paragraph::new("Fetching devices…")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(theme.dim));
         f.render_widget(p, area);
         return;
     }
     if devices.is_empty() {
         let p = Paragraph::new("No Spotify Connect devices visible. Open Spotify on a device.")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme.dim))
             .wrap(Wrap { trim: true });
         f.render_widget(p, area);
         return;
@@ -111,7 +117,7 @@ fn render_devices(
                 .map(|v| format!("  vol {v}%"))
                 .unwrap_or_default();
             ListItem::new(Line::from(vec![
-                Span::styled(active, Style::default().fg(Color::Green)),
+                Span::styled(active, Style::default().fg(theme.success)),
                 Span::styled(
                     d.name.clone(),
                     Style::default()
@@ -119,7 +125,7 @@ fn render_devices(
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(format!("  ({})", d.kind), Style::default().fg(Color::Gray)),
-                Span::styled(vol, Style::default().fg(Color::DarkGray)),
+                Span::styled(vol, Style::default().fg(theme.dim)),
             ]))
         })
         .collect();
@@ -127,29 +133,29 @@ fn render_devices(
         .block(block)
         .highlight_style(
             Style::default()
-                .bg(Color::Cyan)
-                .fg(Color::Black)
+                .bg(theme.accent)
+                .fg(theme.highlight_fg)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, area, state);
 }
 
-fn render_help(f: &mut Frame, area: Rect) {
+fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(theme.warn))
         .title(Span::styled(
             " Help — esc / ? to close ",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme.warn)
                 .add_modifier(Modifier::BOLD),
         ));
 
     let key = Style::default()
-        .fg(Color::Yellow)
+        .fg(theme.warn)
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(Color::DarkGray);
+    let dim = Style::default().fg(theme.dim);
     let body = vec![
         Line::from(Span::styled("Global", dim)),
         kb("ctrl-c", "quit", key),
@@ -159,6 +165,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         kb("+ / -", "volume +5 / -5", key),
         kb("R", "reload library", key),
         kb("d", "device picker", key),
+        kb("shift+C", "color picker", key),
         kb("?", "this help", key),
         kb("tab / shift-tab", "cycle panes", key),
         kb("1-5", "jump to pane", key),
@@ -198,6 +205,98 @@ fn kb(k: &str, desc: &str, key_style: Style) -> Line<'static> {
     ])
 }
 
+/// Palette the color picker cycles through. The full ratatui named-color set,
+/// minus `Reset` (which is "no color" — confusing in a slot-picker context),
+/// plus a couple of useful RGB-defined shades that the named set lacks
+/// (no DarkGreen at the terminal level — most palettes only ship Green +
+/// LightGreen, both of which read as bright).
+pub const PICKER_PALETTE: &[Color] = &[
+    Color::Black,
+    Color::DarkGray,
+    Color::Gray,
+    Color::White,
+    Color::Red,
+    Color::LightRed,
+    Color::Rgb(0, 100, 0), // dark green
+    Color::Green,
+    Color::LightGreen,
+    Color::Yellow,
+    Color::LightYellow,
+    Color::Blue,
+    Color::LightBlue,
+    Color::Magenta,
+    Color::LightMagenta,
+    Color::Cyan,
+    Color::LightCyan,
+];
+
+pub const NUM_SLOTS: usize = 5;
+const SLOT_NAMES: [&str; NUM_SLOTS] = ["accent", "success", "warn", "dim", "highlight_fg"];
+
+fn render_colors(f: &mut Frame, area: Rect, slot: usize, theme: &Theme) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " Colors — ↑/↓ slot, ←/→ cycle, enter save, esc revert ",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let slot_values = [
+        theme.accent,
+        theme.success,
+        theme.warn,
+        theme.dim,
+        theme.highlight_fg,
+    ];
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(NUM_SLOTS + 2);
+    for (i, name) in SLOT_NAMES.iter().enumerate() {
+        let cursor = if i == slot { "▸ " } else { "  " };
+        let color = slot_values[i];
+        let value = crate::config::color_to_string(color);
+        // For highlight_fg, demo the color as it'll actually appear in-app:
+        // foreground over the accent background.
+        let demo_style = if i == NUM_SLOTS - 1 {
+            Style::default()
+                .fg(color)
+                .bg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                cursor.to_string(),
+                Style::default().fg(theme.accent),
+            ),
+            Span::styled(format!("{:<13}", name), Style::default().fg(Color::Reset)),
+            Span::styled(value, demo_style),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Live preview — your changes apply immediately. Esc reverts.",
+        Style::default().fg(theme.dim),
+    )));
+
+    let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: true });
+    f.render_widget(p, area);
+}
+
+/// Mutable slot accessor — used by the picker key handler to read/write the
+/// theme by slot index without each call site repeating the match.
+pub fn theme_slot_mut(theme: &mut Theme, slot: usize) -> &mut Color {
+    match slot {
+        0 => &mut theme.accent,
+        1 => &mut theme.success,
+        2 => &mut theme.warn,
+        3 => &mut theme.dim,
+        _ => &mut theme.highlight_fg,
+    }
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let v = Layout::default()
         .direction(Direction::Vertical)
@@ -226,12 +325,12 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         format!("Library ({})", app.playlists.len())
     };
-    let block = pane_block(title, focused, 1);
+    let block = pane_block(title, focused, 1, &app.theme);
 
     if app.library_loading && app.playlists.is_empty() {
         let p = Paragraph::new("Fetching playlists…")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(app.theme.dim))
             .wrap(Wrap { trim: true });
         f.render_widget(p, area);
         return;
@@ -239,7 +338,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     if app.playlists.is_empty() {
         let p = Paragraph::new("No playlists.")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(app.theme.dim));
         f.render_widget(p, area);
         return;
     }
@@ -267,13 +366,13 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
             let name_style = if is_liked {
                 Style::default().fg(Color::LightRed)
             } else if owned_by_spotify {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(app.theme.dim)
             } else if is_self {
                 Style::default().fg(Color::Reset)
             } else {
                 Style::default().fg(owner_color(&p.owner))
             };
-            let dim = Style::default().fg(Color::DarkGray);
+            let dim = Style::default().fg(app.theme.dim);
             let name = pad(&p.name, name_w);
             let count = format!("{:>5}", p.track_count);
             let mut spans = vec![
@@ -282,14 +381,15 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::styled(count, dim),
             ];
             if owned_by_spotify {
-                spans.push(Span::styled(" ⚠", Style::default().fg(Color::Yellow)));
+                spans.push(Span::styled(" ⚠", Style::default().fg(app.theme.warn)));
             }
             ListItem::new(Line::from(spans))
         })
         .collect();
+    let theme = app.theme;
     let list = List::new(items)
         .block(block)
-        .highlight_style(highlight_style(focused))
+        .highlight_style(highlight_style(focused, &theme))
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, area, &mut app.library_state);
 }
@@ -298,6 +398,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Pane::Listing;
+    let theme = app.theme;
     // Pull the open playlist's metadata once so the title can show owner / date /
     // duration alongside the name. These come from `app.playlists` (loaded on
     // startup) and `total_duration_ms` / `min_added_at` (filled when we fetch
@@ -335,12 +436,12 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
             parts.join(" · ")
         }
     };
-    let block = pane_block(title, focused, 2);
+    let block = pane_block(title, focused, 2, &theme);
 
     let Some(l) = app.listing.as_mut() else {
         let p = Paragraph::new("Open a playlist from Library (Enter).")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme.dim))
             .wrap(Wrap { trim: true });
         f.render_widget(p, area);
         return;
@@ -352,7 +453,7 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
             "(empty)"
         })
         .block(block)
-        .style(Style::default().fg(Color::DarkGray));
+        .style(Style::default().fg(theme.dim));
         f.render_widget(p, area);
         return;
     }
@@ -386,7 +487,7 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
             let dur = format!(" {:>5}", fmt_ms(t.duration_ms));
             let name_style = if is_now {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(theme.success)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Reset)
@@ -394,21 +495,21 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{marker} "),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(theme.success),
                 ),
-                Span::styled(num, Style::default().fg(Color::DarkGray)),
+                Span::styled(num, Style::default().fg(theme.dim)),
                 Span::styled(name, name_style),
                 Span::raw(" "),
-                Span::styled(artists, Style::default().fg(Color::Cyan)),
+                Span::styled(artists, Style::default().fg(theme.accent)),
                 Span::raw(" "),
                 Span::styled(album, Style::default().fg(Color::Gray)),
-                Span::styled(dur, Style::default().fg(Color::DarkGray)),
+                Span::styled(dur, Style::default().fg(theme.dim)),
             ]))
         })
         .collect();
     let list = List::new(items)
         .block(block)
-        .highlight_style(highlight_style(focused))
+        .highlight_style(highlight_style(focused, &theme))
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, area, &mut l.state);
 }
@@ -430,6 +531,7 @@ fn render_search_results(f: &mut Frame, area: Rect, app: &mut App) {
         pane_focused,
         Color::Magenta,
         5,
+        &app.theme,
     );
 
     if app.search.results.is_empty() {
@@ -440,7 +542,7 @@ fn render_search_results(f: &mut Frame, area: Rect, app: &mut App) {
         };
         let p = Paragraph::new(body)
             .block(block)
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(app.theme.dim))
             .wrap(Wrap { trim: true });
         f.render_widget(p, area);
         return;
@@ -465,10 +567,10 @@ fn render_search_results(f: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(Line::from(vec![
                 Span::styled(name, Style::default().fg(Color::Reset)),
                 Span::raw(" "),
-                Span::styled(artists, Style::default().fg(Color::Cyan)),
+                Span::styled(artists, Style::default().fg(app.theme.accent)),
                 Span::raw(" "),
                 Span::styled(album, Style::default().fg(Color::Gray)),
-                Span::styled(dur, Style::default().fg(Color::DarkGray)),
+                Span::styled(dur, Style::default().fg(app.theme.dim)),
             ]))
         })
         .collect();
@@ -477,10 +579,10 @@ fn render_search_results(f: &mut Frame, area: Rect, app: &mut App) {
         .highlight_style(if results_focused {
             Style::default()
                 .bg(Color::Magenta)
-                .fg(Color::Black)
+                .fg(app.theme.highlight_fg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            Style::default().bg(app.theme.dim).fg(Color::White)
         })
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, area, &mut app.search.state);
@@ -491,7 +593,7 @@ fn render_search_input(f: &mut Frame, area: Rect, app: &mut App) {
     let input_focused = pane_focused && app.search.sub_focus == SearchSubFocus::Input;
 
     let title = "Search".to_string();
-    let block = pane_block_colored(title, input_focused, pane_focused, Color::Magenta, 6);
+    let block = pane_block_colored(title, input_focused, pane_focused, Color::Magenta, 6, &app.theme);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -500,7 +602,7 @@ fn render_search_input(f: &mut Frame, area: Rect, app: &mut App) {
     let prompt_color = if input_focused {
         Color::Magenta
     } else {
-        Color::DarkGray
+        app.theme.dim
     };
     let input_line = Line::from(vec![
         Span::styled("/ ", Style::default().fg(prompt_color)),
@@ -523,17 +625,18 @@ fn render_search_input(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Pane::Queue;
+    let theme = app.theme;
     let title = if app.queue.is_empty() {
         "Queue".to_string()
     } else {
         format!("Queue ({})", app.queue.len())
     };
-    let block = pane_block(title, focused, 4);
+    let block = pane_block(title, focused, 4, &theme);
 
     if app.queue.is_empty() {
         let p = Paragraph::new("Nothing queued.")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(theme.dim));
         f.render_widget(p, area);
         return;
     }
@@ -553,14 +656,14 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(Line::from(vec![
                 Span::styled(name, Style::default().fg(Color::Reset)),
                 Span::raw(" "),
-                Span::styled(artists, Style::default().fg(Color::Cyan)),
-                Span::styled(dur, Style::default().fg(Color::DarkGray)),
+                Span::styled(artists, Style::default().fg(theme.accent)),
+                Span::styled(dur, Style::default().fg(theme.dim)),
             ]))
         })
         .collect();
     let list = List::new(items)
         .block(block)
-        .highlight_style(highlight_style(focused))
+        .highlight_style(highlight_style(focused, &theme))
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, area, &mut app.queue_state);
 }
@@ -572,22 +675,23 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
         "Now Playing".to_string(),
         app.focus == Pane::NowPlaying,
         3,
+        &app.theme,
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     let lines = match &app.playback {
-        Some(p) => now_playing_lines(p),
+        Some(p) => now_playing_lines(p, &app.theme),
         None => vec![Line::from(Span::styled(
             "Nothing is playing.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(app.theme.dim),
         ))],
     };
     let body = Paragraph::new(lines).wrap(Wrap { trim: true });
     f.render_widget(body, inner);
 }
 
-fn now_playing_lines(p: &Playback) -> Vec<Line<'static>> {
+fn now_playing_lines(p: &Playback, theme: &Theme) -> Vec<Line<'static>> {
     let title = p.track.clone().unwrap_or_else(|| "—".to_string());
     let artists = p.artists.clone().unwrap_or_else(|| "—".to_string());
     let album = p.album.clone().unwrap_or_else(|| "—".to_string());
@@ -604,14 +708,14 @@ fn now_playing_lines(p: &Playback) -> Vec<Line<'static>> {
                 .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(artists, Style::default().fg(Color::Cyan))),
+        Line::from(Span::styled(artists, Style::default().fg(theme.accent))),
         Line::from(Span::styled(album, Style::default().fg(Color::Gray))),
         Line::from(""),
         Line::from(bar),
         Line::from(vec![
-            Span::styled(state, Style::default().fg(Color::Green)),
+            Span::styled(state, Style::default().fg(theme.success)),
             Span::raw("   "),
-            Span::styled(vol, Style::default().fg(Color::DarkGray)),
+            Span::styled(vol, Style::default().fg(theme.dim)),
         ]),
     ]
 }
@@ -671,14 +775,14 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(
             format!(" {mode} "),
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(app.theme.highlight_fg)
+                .bg(app.theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(msg, Style::default().fg(Color::Gray)),
         Span::raw("    "),
-        Span::styled("ctrl-c quit", Style::default().fg(Color::DarkGray)),
+        Span::styled("ctrl-c quit", Style::default().fg(app.theme.dim)),
     ]);
     let p = Paragraph::new(line);
     f.render_widget(p, area);
@@ -686,18 +790,18 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 
 // ---------- Helpers ----------
 
-fn pane_block<'a>(title: String, focused: bool, idx: u8) -> Block<'a> {
+fn pane_block<'a>(title: String, focused: bool, idx: u8, theme: &Theme) -> Block<'a> {
     let title_text = format!(" {idx}  {title} ");
     let (border_style, title_style) = if focused {
         (
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme.accent),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         )
     } else {
         (
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.dim),
             Style::default().fg(Color::Gray),
         )
     };
@@ -717,6 +821,7 @@ fn pane_block_colored<'a>(
     pane_focused: bool,
     accent: Color,
     idx: u8,
+    theme: &Theme,
 ) -> Block<'a> {
     let title_text = format!(" {idx}  {title} ");
     let (border_style, title_style) = if sub_focused {
@@ -733,7 +838,7 @@ fn pane_block_colored<'a>(
         )
     } else {
         (
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.dim),
             Style::default().fg(Color::Gray),
         )
     };
@@ -743,14 +848,14 @@ fn pane_block_colored<'a>(
         .title(Span::styled(title_text, title_style))
 }
 
-fn highlight_style(focused: bool) -> Style {
+fn highlight_style(focused: bool, theme: &Theme) -> Style {
     if focused {
         Style::default()
-            .bg(Color::Cyan)
-            .fg(Color::Black)
+            .bg(theme.accent)
+            .fg(theme.highlight_fg)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().bg(Color::DarkGray).fg(Color::White)
+        Style::default().bg(theme.dim).fg(Color::White)
     }
 }
 

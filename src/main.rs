@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
 
     let cache = cache::Cache::new(paths.cache_root.clone());
 
-    app::run(spotify, cfg.poll_ms, cache).await?;
+    app::run(spotify, cfg, paths, cache).await?;
     Ok(())
 }
 

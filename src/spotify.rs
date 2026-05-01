@@ -10,6 +10,16 @@ use crate::app::{Playback, PlaylistRef, TrackRef};
 
 const API: &str = "https://api.spotify.com/v1";
 
+/// Sentinel id used in `PlaylistRef::id` for the synthetic Liked Songs entry.
+/// Liked Songs isn't a real playlist in the Spotify API — it lives at /me/tracks —
+/// so we fake it as a playlist with this id and branch on it where it matters.
+pub const LIKED_PLAYLIST_ID: &str = "__liked__";
+
+pub struct Me {
+    pub display_name: String,
+    pub id: String,
+}
+
 async fn token(client: &AuthCodePkceSpotify) -> Result<String> {
     let guard = client.token.lock().await.unwrap();
     guard
@@ -168,6 +178,25 @@ pub async fn fetch_playback(client: &AuthCodePkceSpotify) -> Result<Option<Playb
 pub async fn list_playlists(client: &AuthCodePkceSpotify) -> Result<Vec<PlaylistRef>> {
     let tok = token(client).await?;
     let mut out = Vec::new();
+
+    // Synthetic "Liked Songs" entry. /me/tracks?limit=1 returns the saved-track
+    // total without paging the whole list. If it fails we still show the entry
+    // (count = 0) rather than dropping it entirely.
+    let liked_total = get_json(&format!("{API}/me/tracks?limit=1"), &tok)
+        .await
+        .ok()
+        .and_then(|j| j.get("total").and_then(|v| v.as_u64()))
+        .unwrap_or(0) as u32;
+    out.push(PlaylistRef {
+        id: LIKED_PLAYLIST_ID.to_string(),
+        name: "♥ Liked Songs".to_string(),
+        owner: String::new(),
+        track_count: liked_total,
+        snapshot_id: String::new(),
+        min_added_at: None,
+        total_duration_ms: None,
+    });
+
     let mut url = format!("{API}/me/playlists?limit=50");
     loop {
         let json = get_json(&url, &tok).await?;
@@ -220,28 +249,30 @@ pub async fn list_playlists(client: &AuthCodePkceSpotify) -> Result<Vec<Playlist
     Ok(out)
 }
 
-pub struct PlaylistTracks {
-    pub tracks: Vec<TrackRef>,
-    pub total: u32,
-    pub min_added_at: Option<String>,
-}
-
 pub async fn list_playlist_tracks(
     client: &AuthCodePkceSpotify,
     playlist_id: &str,
-) -> Result<PlaylistTracks> {
+    mut on_page: impl FnMut(&[TrackRef], u32, bool, bool, Option<&str>),
+) -> Result<Vec<TrackRef>> {
     let tok = token(client).await?;
     let mut out = Vec::new();
     let mut total: u32 = 0;
     let mut min_added_at: Option<String> = None;
+    let mut is_first = true;
     // Use /playlists/{id}/items, the documented current endpoint.
     // /playlists/{id}/tracks is deprecated and returns 403 for new dev-mode apps.
-    let mut url = format!("{API}/playlists/{playlist_id}/items?limit=100");
+    // Sentinel: route the synthetic Liked Songs id to /me/tracks.
+    let mut url = if playlist_id == LIKED_PLAYLIST_ID {
+        format!("{API}/me/tracks?limit=50")
+    } else {
+        format!("{API}/playlists/{playlist_id}/items?limit=100")
+    };
     loop {
         let json = get_json(&url, &tok).await?;
         if total == 0 {
             total = json.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
         }
+        let page_start = out.len();
         if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
             for item in items {
                 // Track the earliest added_at for "added since" display.
@@ -312,30 +343,50 @@ pub async fn list_playlist_tracks(
                 });
             }
         }
-        match json.get("next").and_then(|v| v.as_str()) {
-            Some(next) if !next.is_empty() => url = next.to_string(),
-            _ => break,
+        let has_next = json
+            .get("next")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let is_last = !has_next;
+        on_page(
+            &out[page_start..],
+            total,
+            is_first,
+            is_last,
+            min_added_at.as_deref(),
+        );
+        is_first = false;
+        if is_last {
+            break;
         }
+        url = json
+            .get("next")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
     }
-    Ok(PlaylistTracks {
-        tracks: out,
-        total,
-        min_added_at,
-    })
+    let _ = min_added_at; // Reported per-page via on_page; final value is the same.
+    Ok(out)
 }
 
 /// Fetch the current user's display name (or id as fallback). Used so the UI can
 /// distinguish self-owned playlists from collaborator-owned ones.
-pub async fn fetch_me_display_name(client: &AuthCodePkceSpotify) -> Result<String> {
+pub async fn fetch_me(client: &AuthCodePkceSpotify) -> Result<Me> {
     let tok = token(client).await?;
     let json = get_json(&format!("{API}/me"), &tok).await?;
-    let name = json
+    let id = json
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("no id on /me"))?
+        .to_string();
+    let display_name = json
         .get("display_name")
         .and_then(|v| v.as_str())
-        .or_else(|| json.get("id").and_then(|v| v.as_str()))
-        .ok_or_else(|| anyhow!("no display_name or id on /me"))?
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&id)
         .to_string();
-    Ok(name)
+    Ok(Me { display_name, id })
 }
 
 pub async fn probe_playlist_meta(
@@ -723,3 +774,4 @@ pub async fn play_in_context(
     }
     Ok(())
 }
+

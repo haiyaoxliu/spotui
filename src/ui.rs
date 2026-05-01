@@ -165,6 +165,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled("Library", dim)),
         kb("↑/↓ or j/k", "move cursor", key),
+        kb("shift+↑/↓ or J/K", "move cursor by 10", key),
         kb("enter", "open playlist into Listing", key),
         kb("/", "focus search", key),
         Line::from(""),
@@ -259,10 +260,13 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .map(|p| {
             let owned_by_spotify = p.owner.eq_ignore_ascii_case("Spotify");
+            let is_liked = p.id == crate::spotify::LIKED_PLAYLIST_ID;
             let is_self = me_ref
                 .map(|me| me.eq_ignore_ascii_case(&p.owner))
                 .unwrap_or(false);
-            let name_style = if owned_by_spotify {
+            let name_style = if is_liked {
+                Style::default().fg(Color::LightRed)
+            } else if owned_by_spotify {
                 Style::default().fg(Color::DarkGray)
             } else if is_self {
                 Style::default().fg(Color::Reset)

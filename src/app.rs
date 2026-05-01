@@ -146,6 +146,10 @@ pub struct App {
     /// to render self-owned playlists in white vs the per-owner color palette.
     pub me_name: Option<String>,
 
+    /// Current user's Spotify id (always the bare id, not display_name). Needed
+    /// to build the `spotify:user:<id>:collection` context URI for Liked Songs.
+    pub me_id: Option<String>,
+
     pub overlay: Overlay,
 }
 
@@ -172,6 +176,7 @@ impl App {
                 sub_focus: SearchSubFocus::Input,
             },
             me_name: None,
+            me_id: None,
             overlay: Overlay::None,
         }
     }
@@ -194,6 +199,12 @@ enum Action {
         tracks: Vec<TrackRef>,
         total: u32,
         min_added_at: Option<String>,
+        /// First page of a streaming load — replace any cached tracks rather
+        /// than append, and reset the cursor.
+        is_first: bool,
+        /// Last page — flip "missing tracks" status, etc. Loading flag flips
+        /// to false on the first page, not the last.
+        is_last: bool,
     },
     TracksError {
         playlist_id: String,
@@ -210,7 +221,7 @@ enum Action {
     },
     DevicesLoaded(Vec<DeviceRef>),
     DevicesError(String),
-    MeLoaded(String),
+    MeLoaded { display_name: String, id: String },
 }
 
 pub async fn run(
@@ -330,9 +341,12 @@ async fn run_inner(
         let me_tx = tx.clone();
         let s = spotify.clone();
         tokio::spawn(async move {
-            match spotify::fetch_me_display_name(&s).await {
-                Ok(name) => {
-                    let _ = me_tx.send(Action::MeLoaded(name));
+            match spotify::fetch_me(&s).await {
+                Ok(me) => {
+                    let _ = me_tx.send(Action::MeLoaded {
+                        display_name: me.display_name,
+                        id: me.id,
+                    });
                 }
                 Err(e) => tracing::debug!("me load: {e}"),
             }
@@ -400,44 +414,62 @@ async fn apply_action(
             tracks,
             total,
             min_added_at,
+            is_first,
+            is_last,
         } => {
-            // Update playlist stats so the library row eventually has date/length.
-            let total_duration_ms: u64 = tracks.iter().map(|t| t.duration_ms).sum();
-            let mut updated = false;
-            for p in app.playlists.iter_mut() {
-                if p.id == playlist_id {
-                    if min_added_at.is_some() {
-                        p.min_added_at = min_added_at.clone();
-                    }
-                    p.total_duration_ms = Some(total_duration_ms);
-                    updated = true;
-                    break;
-                }
-            }
-            if updated {
-                if let Err(e) = cache.save_playlists(&app.playlists) {
-                    tracing::warn!("playlist stats persist: {e}");
-                }
-            }
-
+            // Apply the page to the open listing if it still matches.
             if let Some(l) = app.listing.as_mut() {
                 if l.playlist_id == playlist_id {
                     let prior_cursor = l.state.selected();
-                    let missing = (total as usize).saturating_sub(tracks.len());
-                    l.tracks = tracks;
-                    l.loading = false;
-                    if l.tracks.is_empty() {
-                        l.state.select(None);
+                    if is_first {
+                        l.tracks = tracks;
+                        l.loading = false;
+                        if l.tracks.is_empty() {
+                            l.state.select(None);
+                        } else {
+                            let cur = prior_cursor.unwrap_or(0).min(l.tracks.len() - 1);
+                            l.state.select(Some(cur));
+                        }
                     } else {
-                        let cur = prior_cursor.unwrap_or(0).min(l.tracks.len() - 1);
-                        l.state.select(Some(cur));
+                        l.tracks.extend(tracks);
                     }
-                    if missing > 0 {
-                        app.status = Some(format!(
-                            "loaded {} tracks; {} skipped (likely local/regional)",
-                            l.tracks.len(),
-                            missing
-                        ));
+                    if is_last {
+                        let missing = (total as usize).saturating_sub(l.tracks.len());
+                        if missing > 0 {
+                            app.status = Some(format!(
+                                "loaded {} tracks; {} skipped (likely local/regional)",
+                                l.tracks.len(),
+                                missing
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Persist playlist stats only on the final page (we have the
+            // complete set then). Skip the synthetic Liked Songs entry —
+            // it isn't a real cached playlist.
+            if is_last && playlist_id != spotify::LIKED_PLAYLIST_ID {
+                if let Some(l) = app.listing.as_ref() {
+                    if l.playlist_id == playlist_id {
+                        let total_duration_ms: u64 =
+                            l.tracks.iter().map(|t| t.duration_ms).sum();
+                        let mut updated = false;
+                        for p in app.playlists.iter_mut() {
+                            if p.id == playlist_id {
+                                if min_added_at.is_some() {
+                                    p.min_added_at = min_added_at.clone();
+                                }
+                                p.total_duration_ms = Some(total_duration_ms);
+                                updated = true;
+                                break;
+                            }
+                        }
+                        if updated {
+                            if let Err(e) = cache.save_playlists(&app.playlists) {
+                                tracing::warn!("playlist stats persist: {e}");
+                            }
+                        }
                     }
                 }
             }
@@ -515,8 +547,9 @@ async fn apply_action(
             }
             app.status = Some(format!("devices: {e}"));
         }
-        Action::MeLoaded(name) => {
-            app.me_name = Some(name);
+        Action::MeLoaded { display_name, id } => {
+            app.me_name = Some(display_name);
+            app.me_id = Some(id);
         }
     }
 }
@@ -532,6 +565,7 @@ async fn handle_key(
 ) {
     use KeyCode::*;
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
     if matches!(key.code, Char('c')) && ctrl {
         app.should_quit = true;
@@ -563,6 +597,10 @@ async fn handle_key(
         (Char('3'), false) => focus_pane(app, Pane::NowPlaying),
         (Char('4'), false) => focus_pane(app, Pane::Queue),
         (Char('5'), false) => focus_pane(app, Pane::Search),
+        (Char('J'), false) => move_cursor(app, 10),
+        (Char('K'), false) => move_cursor(app, -10),
+        (Down, _) if shift => move_cursor(app, 10),
+        (Up, _) if shift => move_cursor(app, -10),
         (Char('j'), false) | (Down, _) => move_cursor(app, 1),
         (Char('k'), false) | (Up, _) => move_cursor(app, -1),
         (Char('g'), false) => move_cursor_to(app, 0),
@@ -1039,17 +1077,32 @@ fn open_library_selection(
     let pid = p.id.clone();
     let snapshot = p.snapshot_id.clone();
     tokio::spawn(async move {
-        match spotify::list_playlist_tracks(&s, &pid).await {
-            Ok(pt) => {
-                if let Err(e) = c.save_tracks(&pid, &snapshot, &pt.tracks) {
-                    tracing::warn!("tracks cache save: {e}");
-                }
-                let _ = tx.send(Action::TracksLoaded {
-                    playlist_id: pid,
-                    tracks: pt.tracks,
-                    total: pt.total,
-                    min_added_at: pt.min_added_at,
+        let pid_for_cb = pid.clone();
+        let tx_for_cb = tx.clone();
+        let result = spotify::list_playlist_tracks(
+            &s,
+            &pid,
+            |page, total, is_first, is_last, min_added_at| {
+                let _ = tx_for_cb.send(Action::TracksLoaded {
+                    playlist_id: pid_for_cb.clone(),
+                    tracks: page.to_vec(),
+                    total,
+                    min_added_at: min_added_at.map(String::from),
+                    is_first,
+                    is_last,
                 });
+            },
+        )
+        .await;
+        match result {
+            Ok(tracks) => {
+                // Don't persist the synthetic Liked Songs entry — it has no
+                // real snapshot id and the next /me/tracks call refreshes it.
+                if pid != spotify::LIKED_PLAYLIST_ID {
+                    if let Err(e) = c.save_tracks(&pid, &snapshot, &tracks) {
+                        tracing::warn!("tracks cache save: {e}");
+                    }
+                }
             }
             Err(e) => {
                 let _ = tx.send(Action::TracksError {
@@ -1069,7 +1122,20 @@ fn play_listing_track(
     let Some(l) = app.listing.as_ref() else { return };
     let Some(idx) = l.state.selected() else { return };
     let Some(track) = l.tracks.get(idx).cloned() else { return };
-    let context_uri = format!("spotify:playlist:{}", l.playlist_id);
+    // Liked Songs has no playlist URI — Spotify exposes it via the user's
+    // collection context. Fall back to playing the track URI directly if me_id
+    // hasn't loaded yet (rare race during first-second of startup).
+    let context_uri = if l.playlist_id == spotify::LIKED_PLAYLIST_ID {
+        match app.me_id.as_ref() {
+            Some(id) => format!("spotify:user:{id}:collection"),
+            None => {
+                app.status = Some("user id not loaded yet — try again in a moment".to_string());
+                return;
+            }
+        }
+    } else {
+        format!("spotify:playlist:{}", l.playlist_id)
+    };
     let device_id = app.playback.as_ref().and_then(|p| p.device_id.clone());
     let s = spotify.clone();
     let tx = tx.clone();
@@ -1120,6 +1186,12 @@ fn add_to_open_playlist(
         app.status = Some("no open playlist — open one from Library first".to_string());
         return;
     };
+    if l.playlist_id == spotify::LIKED_PLAYLIST_ID {
+        app.status = Some(
+            "Liked Songs is read-only here — save tracks from the Spotify client".to_string(),
+        );
+        return;
+    }
     let target_id = l.playlist_id.clone();
     let target_name = l.playlist_name.clone();
 

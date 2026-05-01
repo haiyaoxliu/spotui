@@ -85,6 +85,7 @@ The Client ID and refresh token are persisted at `~/Library/Application Support/
 | Key | Action |
 |---|---|
 | `↑` `↓` `j` `k` | Move cursor |
+| `shift+↑` `shift+↓` `J` `K` | Move cursor by 10 |
 | `g` / `G` | Top / bottom |
 | `enter` | Open playlist into Listing |
 | `/` | Focus search |
@@ -94,6 +95,7 @@ The Client ID and refresh token are persisted at `~/Library/Application Support/
 | Key | Action |
 |---|---|
 | `↑` `↓` `j` `k` | Move cursor |
+| `shift+↑` `shift+↓` `J` `K` | Move cursor by 10 |
 | `enter` | Play track in playlist context |
 | `q` | Queue cursor track |
 | `Q` | Play cursor track now |

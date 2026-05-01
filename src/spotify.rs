@@ -440,10 +440,13 @@ pub async fn search_tracks(
     limit: u32,
 ) -> Result<Vec<TrackRef>> {
     let tok = token(client).await?;
+    // Spotify's documented max is 50, but dev-mode apps are capped at 10
+    // (anything > 10 returns 400 "Invalid limit"). Clamp at the lower bound
+    // so callers can't accidentally trip it.
     let url = format!(
         "{API}/search?q={}&type=track&limit={}",
         urlencoding::encode(query),
-        limit.min(50)
+        limit.clamp(1, 10)
     );
     let json = get_json(&url, &tok).await?;
     let mut out = Vec::new();

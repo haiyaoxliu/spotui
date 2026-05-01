@@ -943,7 +943,9 @@ fn fire_search(
     let tx = tx.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(180)).await;
-        match spotify::search_tracks(&sp, &query, 30).await {
+        // Spotify dev-mode caps /search?limit at 10 (undocumented; 11+ returns
+        // 400 "Invalid limit"). Bump if the app gets Extended Quota approval.
+        match spotify::search_tracks(&sp, &query, 10).await {
             Ok(results) => {
                 let _ = tx.send(Action::SearchResults { seq, results });
             }

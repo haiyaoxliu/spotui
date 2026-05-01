@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
 use reqwest::{Client, StatusCode};
-use rspotify::AuthCodePkceSpotify;
+use rspotify::{AuthCodePkceSpotify, clients::BaseClient};
 use serde_json::Value;
+use tracing::{info, warn};
 
 use crate::app::{Playback, PlaylistRef, TrackRef};
 
@@ -21,6 +22,30 @@ pub struct Me {
 }
 
 async fn token(client: &AuthCodePkceSpotify) -> Result<String> {
+    // Spotify access tokens live ~1 hour. We bypass rspotify's HTTP client and
+    // pull the bearer ourselves, so its built-in auto-refresh never runs —
+    // refresh inline when the cached token has expired. Drop the lock before
+    // calling refetch_token, which acquires it internally.
+    let needs_refresh = {
+        let guard = client.token.lock().await.unwrap();
+        match guard.as_ref() {
+            Some(t) => t.is_expired(),
+            None => return Err(anyhow!("no access token")),
+        }
+    };
+    if needs_refresh {
+        info!("access token expired; refreshing");
+        match client.refetch_token().await {
+            Ok(Some(new_tok)) => {
+                *client.token.lock().await.unwrap() = Some(new_tok);
+                if let Err(e) = client.write_token_cache().await {
+                    warn!("refresh succeeded but writing token cache failed: {e:#}");
+                }
+            }
+            Ok(None) => bail!("token expired and refresh returned no token"),
+            Err(e) => bail!("token refresh failed: {e}"),
+        }
+    }
     let guard = client.token.lock().await.unwrap();
     guard
         .as_ref()

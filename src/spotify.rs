@@ -512,7 +512,12 @@ pub async fn add_to_queue(
     if let Some(id) = device_id {
         url.push_str(&format!("&device_id={id}"));
     }
-    let resp = http().post(&url).bearer_auth(&tok).send().await?;
+    let resp = http()
+        .post(&url)
+        .bearer_auth(&tok)
+        .header(reqwest::header::CONTENT_LENGTH, "0")
+        .send()
+        .await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -624,7 +629,12 @@ pub async fn seek_to(
     if let Some(id) = device_id {
         url.push_str(&format!("&device_id={id}"));
     }
-    let resp = http().put(&url).bearer_auth(&tok).send().await?;
+    let resp = http()
+        .put(&url)
+        .bearer_auth(&tok)
+        .header(reqwest::header::CONTENT_LENGTH, "0")
+        .send()
+        .await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -646,7 +656,12 @@ pub async fn set_volume(
     if let Some(id) = device_id {
         url.push_str(&format!("&device_id={id}"));
     }
-    let resp = http().put(&url).bearer_auth(&tok).send().await?;
+    let resp = http()
+        .put(&url)
+        .bearer_auth(&tok)
+        .header(reqwest::header::CONTENT_LENGTH, "0")
+        .send()
+        .await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();

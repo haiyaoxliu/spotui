@@ -27,6 +27,9 @@ anyhow = "1"
 webbrowser = "1"
 url = "2"
 urlencoding = "2"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+if-addrs = "0.15"
+mdns-sd = "0.19"
 
 [profile.dev]
 opt-level = 1

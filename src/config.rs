@@ -43,6 +43,7 @@ pub struct ColorsConfig {
     pub warn: Option<String>,
     pub dim: Option<String>,
     pub highlight_fg: Option<String>,
+    pub jam: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,6 +56,10 @@ pub struct Theme {
     /// is an accent (e.g. list cursor, search-result cursor, status mode chip).
     /// Defaults to Black; flip to White if you pick a dark accent.
     pub highlight_fg: Color,
+    /// Border color for the right-column "shared" panes (NowPlaying / Queue /
+    /// Jam) when a jam is active, plus the status-bar `jam:*` chip background.
+    /// Defaults to dark green so it reads as "linked".
+    pub jam: Color,
 }
 
 impl Theme {
@@ -65,6 +70,7 @@ impl Theme {
             warn: Color::Yellow,
             dim: Color::DarkGray,
             highlight_fg: Color::Black,
+            jam: Color::Rgb(0, 100, 0),
         }
     }
 
@@ -84,6 +90,7 @@ impl Theme {
                 .as_deref()
                 .and_then(parse_color)
                 .unwrap_or(d.highlight_fg),
+            jam: cc.jam.as_deref().and_then(parse_color).unwrap_or(d.jam),
         }
     }
 
@@ -94,6 +101,7 @@ impl Theme {
             warn: Some(color_to_string(self.warn)),
             dim: Some(color_to_string(self.dim)),
             highlight_fg: Some(color_to_string(self.highlight_fg)),
+            jam: Some(color_to_string(self.jam)),
         }
     }
 }

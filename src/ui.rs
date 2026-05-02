@@ -4,8 +4,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
-use crate::app::{App, Overlay, Pane, Playback, SearchSubFocus};
+use crate::app::{App, DiscoveredJam, JoinField, Overlay, Pane, Playback, SearchSubFocus};
 use crate::config::Theme;
+use crate::jam;
 
 /// Cell width of the `highlight_symbol` prefix on every List row. The widget
 /// reserves this margin for ALL rows (selected and not) so columns stay aligned;
@@ -44,7 +45,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // so cap its height and let Queue absorb the rest of the column.
     let right_rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(10),
+            Constraint::Min(0),
+            Constraint::Length(12),
+        ])
         .split(cols[2]);
 
     render_library(f, cols[0], app);
@@ -53,6 +58,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_search_input(f, mid_rows[2], app);
     render_now_playing(f, right_rows[0], app);
     render_queue(f, right_rows[1], app);
+    render_jam(f, right_rows[2], app);
     render_status(f, status_area, app);
 
     if !matches!(app.overlay, Overlay::None) {
@@ -61,17 +67,49 @@ pub fn render(f: &mut Frame, app: &mut App) {
 }
 
 fn render_overlay(f: &mut Frame, area: Rect, app: &mut App) {
-    let popup = centered_rect(60, 60, area);
-    f.render_widget(Clear, popup);
     let theme = app.theme;
     match &mut app.overlay {
         Overlay::None => {}
-        Overlay::Help => render_help(f, popup, &theme),
+        Overlay::Help => {
+            let popup = centered_rect(60, 60, area);
+            f.render_widget(Clear, popup);
+            render_help(f, popup, &theme);
+        }
         Overlay::Devices { devices, state, loading } => {
+            let popup = centered_rect(60, 60, area);
+            f.render_widget(Clear, popup);
             render_devices(f, popup, devices, state, *loading, &theme);
         }
         Overlay::Colors { slot, .. } => {
+            let popup = centered_rect(60, 60, area);
+            f.render_widget(Clear, popup);
             render_colors(f, popup, *slot, &theme);
+        }
+        Overlay::Confirm { prompt, .. } => {
+            let popup = centered_rect(50, 30, area);
+            f.render_widget(Clear, popup);
+            render_confirm(f, popup, prompt, &theme);
+        }
+        Overlay::Join {
+            sub_focus,
+            host_input,
+            code_input,
+            discovered,
+            discovered_state,
+            browse_handle: _,
+        } => {
+            let popup = centered_rect(60, 50, area);
+            f.render_widget(Clear, popup);
+            render_join_overlay(
+                f,
+                popup,
+                *sub_focus,
+                host_input,
+                code_input,
+                discovered,
+                discovered_state,
+                &theme,
+            );
         }
     }
 }
@@ -168,7 +206,7 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         kb("shift+C", "color picker", key),
         kb("?", "this help", key),
         kb("tab / shift-tab", "cycle panes", key),
-        kb("1-5", "jump to pane", key),
+        kb("1-7", "jump to pane", key),
         Line::from(""),
         Line::from(Span::styled("Library", dim)),
         kb("↑/↓ or j/k", "move cursor", key),
@@ -193,6 +231,12 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         kb("q / Q", "queue / play-now", key),
         kb("a", "add to open playlist", key),
         kb("/", "back to input", key),
+        Line::from(""),
+        Line::from(Span::styled("Jam (pane 7)", dim)),
+        kb("shift-S", "start hosting (when idle)", key),
+        kb("shift-J", "join a jam (when idle)", key),
+        kb("shift-E", "end jam (host) / leave (client)", key),
+        kb("shift-X", "kick selected participant (host)", key),
     ];
     let p = Paragraph::new(body).block(block).wrap(Wrap { trim: true });
     f.render_widget(p, area);
@@ -230,8 +274,9 @@ pub const PICKER_PALETTE: &[Color] = &[
     Color::LightCyan,
 ];
 
-pub const NUM_SLOTS: usize = 5;
-const SLOT_NAMES: [&str; NUM_SLOTS] = ["accent", "success", "warn", "dim", "highlight_fg"];
+pub const NUM_SLOTS: usize = 6;
+const SLOT_NAMES: [&str; NUM_SLOTS] =
+    ["accent", "success", "warn", "dim", "highlight_fg", "jam"];
 
 fn render_colors(f: &mut Frame, area: Rect, slot: usize, theme: &Theme) {
     let block = Block::default()
@@ -250,6 +295,7 @@ fn render_colors(f: &mut Frame, area: Rect, slot: usize, theme: &Theme) {
         theme.warn,
         theme.dim,
         theme.highlight_fg,
+        theme.jam,
     ];
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(NUM_SLOTS + 2);
     for (i, name) in SLOT_NAMES.iter().enumerate() {
@@ -258,7 +304,7 @@ fn render_colors(f: &mut Frame, area: Rect, slot: usize, theme: &Theme) {
         let value = crate::config::color_to_string(color);
         // For highlight_fg, demo the color as it'll actually appear in-app:
         // foreground over the accent background.
-        let demo_style = if i == NUM_SLOTS - 1 {
+        let demo_style = if *name == "highlight_fg" {
             Style::default()
                 .fg(color)
                 .bg(theme.accent)
@@ -293,7 +339,8 @@ pub fn theme_slot_mut(theme: &mut Theme, slot: usize) -> &mut Color {
         1 => &mut theme.success,
         2 => &mut theme.warn,
         3 => &mut theme.dim,
-        _ => &mut theme.highlight_fg,
+        4 => &mut theme.highlight_fg,
+        _ => &mut theme.jam,
     }
 }
 
@@ -631,7 +678,7 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         format!("Queue ({})", app.queue.len())
     };
-    let block = pane_block(title, focused, 4, &theme);
+    let block = jam_aware_block(title, focused, 4, &theme, app.jam.is_active());
 
     if app.queue.is_empty() {
         let p = Paragraph::new("Nothing queued.")
@@ -649,12 +696,17 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
     let items: Vec<ListItem> = app
         .queue
         .iter()
-        .map(|t| {
+        .map(|entry| {
+            let t = &entry.track;
+            let name_color = entry
+                .submitter
+                .and_then(|id| participant_color(app, id))
+                .unwrap_or(Color::Reset);
             let name = pad(&t.name, name_w);
             let artists = pad(&t.artists, artists_w);
             let dur = format!(" {:>5}", fmt_ms(t.duration_ms));
             ListItem::new(Line::from(vec![
-                Span::styled(name, Style::default().fg(Color::Reset)),
+                Span::styled(name, Style::default().fg(name_color)),
                 Span::raw(" "),
                 Span::styled(artists, Style::default().fg(theme.accent)),
                 Span::styled(dur, Style::default().fg(theme.dim)),
@@ -668,14 +720,25 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_stateful_widget(list, area, &mut app.queue_state);
 }
 
+/// Find a participant's color in the current jam state, if any. Used to color
+/// queue rows by submitter (works on both host and client side).
+fn participant_color(app: &App, id: jam::ParticipantId) -> Option<Color> {
+    match &app.jam {
+        jam::JamState::Host(h) => h.participants.iter().find(|p| p.id == id).map(|p| p.color),
+        jam::JamState::Client(c) => c.participants.iter().find(|p| p.id == id).map(|p| p.color),
+        jam::JamState::Idle => None,
+    }
+}
+
 // ---------- Now Playing ----------
 
 fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
-    let block = pane_block(
+    let block = jam_aware_block(
         "Now Playing".to_string(),
         app.focus == Pane::NowPlaying,
         3,
         &app.theme,
+        app.jam.is_active(),
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -750,6 +813,332 @@ fn fmt_long(ms: u64) -> String {
     }
 }
 
+// ---------- Jam ----------
+
+fn render_jam(f: &mut Frame, area: Rect, app: &mut App) {
+    let focused = app.focus == Pane::Jam;
+    let theme = app.theme;
+    let in_jam = app.jam.is_active();
+
+    match &mut app.jam {
+        jam::JamState::Idle => {
+            let block = jam_aware_block("Jam".to_string(), focused, 7, &theme, in_jam);
+            let p = Paragraph::new(idle_jam_lines(&theme))
+                .block(block)
+                .wrap(Wrap { trim: true });
+            f.render_widget(p, area);
+        }
+        jam::JamState::Host(host) => render_host_pane(f, area, focused, host, &theme),
+        jam::JamState::Client(client) => render_client_pane(f, area, focused, client, &theme),
+    }
+}
+
+fn idle_jam_lines(theme: &Theme) -> Vec<Line<'static>> {
+    let key = Style::default().fg(theme.warn).add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(theme.dim);
+    let body = Style::default().fg(Color::Reset);
+    vec![
+        Line::from(""),
+        Line::from(Span::styled("  Not in a jam.", dim)),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  shift-S  ", key),
+            Span::styled("start hosting", body),
+        ]),
+        Line::from(vec![
+            Span::styled("  shift-J  ", key),
+            Span::styled("join a jam", body),
+        ]),
+    ]
+}
+
+fn render_host_pane(
+    f: &mut Frame,
+    area: Rect,
+    focused: bool,
+    host: &mut jam::HostState,
+    theme: &Theme,
+) {
+    let block = jam_aware_block("Jam (host)".to_string(), focused, 7, theme, true);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // header (3) | participants list (rest) | hint (1)
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let label = Style::default().fg(theme.dim);
+    let value = Style::default().fg(Color::Reset).add_modifier(Modifier::BOLD);
+    let header = vec![
+        Line::from(vec![
+            Span::styled("ip:    ", label),
+            Span::styled(host.bind_addr.to_string(), value),
+        ]),
+        Line::from(vec![
+            Span::styled("code:  ", label),
+            Span::styled(host.code.clone(), value),
+        ]),
+        Line::from(""),
+    ];
+    f.render_widget(Paragraph::new(header), rows[0]);
+
+    let part_title = format!("Participants ({})", host.participants.len());
+    let part_block = Block::default().title(Span::styled(part_title, label));
+    let items: Vec<ListItem> = host
+        .participants
+        .iter()
+        .map(|p| {
+            let suffix = if p.is_self { " (you)" } else { "" };
+            ListItem::new(Line::from(vec![
+                Span::styled(p.display_name.clone(), Style::default().fg(p.color)),
+                Span::styled(suffix, Style::default().fg(theme.dim)),
+            ]))
+        })
+        .collect();
+    let list = List::new(items)
+        .block(part_block)
+        .highlight_style(highlight_style(focused, theme))
+        .highlight_symbol("▸ ");
+    f.render_stateful_widget(list, rows[1], &mut host.pane_state);
+
+    let key = Style::default()
+        .fg(theme.warn)
+        .add_modifier(Modifier::BOLD);
+    let hint = Line::from(vec![
+        Span::styled("shift-X", key),
+        Span::styled(" kick · ", Style::default().fg(theme.dim)),
+        Span::styled("shift-E", key),
+        Span::styled(" end jam", Style::default().fg(theme.dim)),
+    ]);
+    f.render_widget(Paragraph::new(hint), rows[2]);
+}
+
+fn render_client_pane(
+    f: &mut Frame,
+    area: Rect,
+    focused: bool,
+    client: &mut jam::ClientState,
+    theme: &Theme,
+) {
+    let block = jam_aware_block("Jam (client)".to_string(), focused, 7, theme, true);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let label = Style::default().fg(theme.dim);
+    let value = Style::default().fg(Color::Reset).add_modifier(Modifier::BOLD);
+    let header = vec![
+        Line::from(vec![
+            Span::styled("host:  ", label),
+            Span::styled(
+                format!("{} ({})", client.host_name, client.host_addr),
+                value,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("code:  ", label),
+            Span::styled(client.code.clone(), value),
+        ]),
+        Line::from(""),
+    ];
+    f.render_widget(Paragraph::new(header), rows[0]);
+
+    let part_title = format!("Participants ({})", client.participants.len());
+    let part_block = Block::default().title(Span::styled(part_title, label));
+    let items: Vec<ListItem> = client
+        .participants
+        .iter()
+        .map(|p| {
+            let suffix = if p.is_self {
+                " (you)"
+            } else if p.is_host {
+                " (host)"
+            } else {
+                ""
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(p.display_name.clone(), Style::default().fg(p.color)),
+                Span::styled(suffix, Style::default().fg(theme.dim)),
+            ]))
+        })
+        .collect();
+    let list = List::new(items)
+        .block(part_block)
+        .highlight_style(highlight_style(focused, theme))
+        .highlight_symbol("▸ ");
+    f.render_stateful_widget(list, rows[1], &mut client.pane_state);
+
+    let key = Style::default()
+        .fg(theme.warn)
+        .add_modifier(Modifier::BOLD);
+    let hint = Line::from(vec![
+        Span::styled("shift-E", key),
+        Span::styled(" leave", Style::default().fg(theme.dim)),
+    ]);
+    f.render_widget(Paragraph::new(hint), rows[2]);
+}
+
+fn render_confirm(f: &mut Frame, area: Rect, prompt: &str, theme: &Theme) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.warn))
+        .title(Span::styled(
+            " Confirm ",
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ));
+    let key = Style::default().fg(theme.warn).add_modifier(Modifier::BOLD);
+    let body = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {prompt}"),
+            Style::default().fg(Color::Reset),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  enter / y  ", key),
+            Span::styled("confirm", Style::default().fg(Color::Reset)),
+        ]),
+        Line::from(vec![
+            Span::styled("  esc / n    ", key),
+            Span::styled("cancel", Style::default().fg(Color::Reset)),
+        ]),
+    ];
+    let p = Paragraph::new(body).block(block).wrap(Wrap { trim: true });
+    f.render_widget(p, area);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_join_overlay(
+    f: &mut Frame,
+    area: Rect,
+    sub_focus: JoinField,
+    host_input: &str,
+    code_input: &str,
+    discovered: &[DiscoveredJam],
+    discovered_state: &mut ratatui::widgets::ListState,
+    theme: &Theme,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " Join Jam ",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // "Discovered" header
+            Constraint::Length(5), // discovered list (or placeholder)
+            Constraint::Length(1), // "— or manual —"
+            Constraint::Length(1), // host:
+            Constraint::Length(1), // code:
+            Constraint::Min(0),    // spacer
+            Constraint::Length(1), // hint
+        ])
+        .split(inner);
+
+    let label = Style::default().fg(theme.dim);
+    let value = Style::default().fg(Color::Reset);
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled("  Discovered", label))),
+        rows[0],
+    );
+
+    if discovered.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "    (none yet — open spotui on another LAN host)",
+                label,
+            ))),
+            rows[1],
+        );
+    } else {
+        let items: Vec<ListItem> = discovered
+            .iter()
+            .map(|d| {
+                ListItem::new(Line::from(vec![
+                    Span::styled(d.display_name.clone(), Style::default().fg(Color::Reset)),
+                    Span::raw("  "),
+                    Span::styled(d.addr.clone(), label),
+                ]))
+            })
+            .collect();
+        let list = List::new(items)
+            .highlight_style(highlight_style(
+                matches!(sub_focus, JoinField::Discovered),
+                theme,
+            ))
+            .highlight_symbol("▸ ");
+        f.render_stateful_widget(list, rows[1], discovered_state);
+    }
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled("  — or manual —", label))),
+        rows[2],
+    );
+
+    let host_line = Line::from(vec![
+        Span::styled("  host:  ", label),
+        Span::styled(host_input.to_string(), value),
+    ]);
+    f.render_widget(Paragraph::new(host_line), rows[3]);
+
+    let code_line = Line::from(vec![
+        Span::styled("  code:  ", label),
+        Span::styled(code_input.to_string(), value),
+    ]);
+    f.render_widget(Paragraph::new(code_line), rows[4]);
+
+    let hint_text = match sub_focus {
+        JoinField::Discovered => "  enter pick · ↑/↓ navigate · tab cycle · esc cancel",
+        _ => "  enter join · tab cycle field · esc cancel",
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(hint_text, label))),
+        rows[6],
+    );
+
+    // Position the terminal's native cursor at the end of the active text
+    // field. Discovered rows use the list highlight instead — no cursor.
+    const FIELD_PREFIX_W: u16 = 9; // "  host:  " / "  code:  "
+    match sub_focus {
+        JoinField::Host => {
+            f.set_cursor_position((
+                rows[3].x + FIELD_PREFIX_W + host_input.chars().count() as u16,
+                rows[3].y,
+            ));
+        }
+        JoinField::Code => {
+            f.set_cursor_position((
+                rows[4].x + FIELD_PREFIX_W + code_input.chars().count() as u16,
+                rows[4].y,
+            ));
+        }
+        JoinField::Discovered => {}
+    }
+}
+
 // ---------- Status bar ----------
 
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
@@ -759,6 +1148,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         Pane::Search => "search",
         Pane::Queue => "queue",
         Pane::NowPlaying => "now playing",
+        Pane::Jam => "jam",
     };
     let default_help = match app.focus {
         Pane::Search => match app.search.sub_focus {
@@ -769,26 +1159,73 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         Pane::Listing => "↑/↓ move • enter play • q queue • Q play-now • a add now-playing here",
         Pane::Queue => "↑/↓ move",
         Pane::NowPlaying => "space play/pause • n/p skip • ←/→ or [/] seek 5s • +/- volume",
+        Pane::Jam => "shift-S start hosting • shift-J join a jam",
     };
     let msg = app.status.as_deref().unwrap_or(default_help);
-    let line = Line::from(vec![
-        Span::styled(
-            format!(" {mode} "),
+    let mut spans = vec![Span::styled(
+        format!(" {mode} "),
+        Style::default()
+            .fg(app.theme.highlight_fg)
+            .bg(app.theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if let Some(role) = app.jam.role() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!(" jam:{role} "),
             Style::default()
                 .fg(app.theme.highlight_fg)
-                .bg(app.theme.accent)
+                .bg(app.theme.jam)
                 .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(msg, Style::default().fg(Color::Gray)),
-        Span::raw("    "),
-        Span::styled("ctrl-c quit", Style::default().fg(app.theme.dim)),
-    ]);
-    let p = Paragraph::new(line);
+        ));
+    }
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(msg, Style::default().fg(Color::Gray)));
+    spans.push(Span::raw("    "));
+    spans.push(Span::styled(
+        "ctrl-c quit",
+        Style::default().fg(app.theme.dim),
+    ));
+    let p = Paragraph::new(Line::from(spans));
     f.render_widget(p, area);
 }
 
 // ---------- Helpers ----------
+
+/// `pane_block` variant for the three "shared during jam" panes (NowPlaying,
+/// Queue, Jam). When a jam is active, the unfocused border uses `theme.jam`
+/// instead of `theme.dim` so the user sees at a glance which panes are linked.
+fn jam_aware_block<'a>(
+    title: String,
+    focused: bool,
+    idx: u8,
+    theme: &Theme,
+    in_jam: bool,
+) -> Block<'a> {
+    let title_text = format!(" {idx}  {title} ");
+    let (border_style, title_style) = if focused {
+        (
+            Style::default().fg(theme.accent),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if in_jam {
+        (
+            Style::default().fg(theme.jam),
+            Style::default().fg(theme.jam),
+        )
+    } else {
+        (
+            Style::default().fg(theme.dim),
+            Style::default().fg(Color::Gray),
+        )
+    };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(Span::styled(title_text, title_style))
+}
 
 fn pane_block<'a>(title: String, focused: bool, idx: u8, theme: &Theme) -> Block<'a> {
     let title_text = format!(" {idx}  {title} ");

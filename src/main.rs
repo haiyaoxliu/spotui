@@ -3,6 +3,8 @@ mod auth;
 mod cache;
 mod config;
 mod diag;
+mod jam;
+mod jam_net;
 mod spotify;
 mod ui;
 

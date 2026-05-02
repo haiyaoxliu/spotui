@@ -11,18 +11,18 @@ use crate::app::{Playback, TrackRef};
 
 pub type ParticipantId = u32;
 
-/// Round-robin palette for participant name colors. Picked to read distinctly
-/// from each other and from the default Cyan/Yellow theme slots so a
-/// participant's name doesn't collide with focus/warn highlights.
-pub const PARTICIPANT_PALETTE: [Color; 8] = [
-    Color::LightMagenta,
-    Color::LightCyan,
-    Color::LightGreen,
-    Color::LightYellow,
-    Color::LightBlue,
-    Color::LightRed,
-    Color::Magenta,
-    Color::Yellow,
+/// Round-robin palette for participant name colors. Saturated mid-dark hues
+/// chosen to read clearly on dark terminals without the eye-strain of the
+/// `Light*` variants, while staying distinct from each other and from the
+/// default theme slots (cyan accent, green success, yellow warn).
+pub const PARTICIPANT_PALETTE: [Color; 7] = [
+    Color::Red,                  // ANSI red — host's color (palette[0])
+    Color::Rgb(0, 100, 0),       // dark green — first joiner
+    Color::Magenta,              // ANSI magenta
+    Color::Rgb(128, 0, 128),     // purple
+    Color::Rgb(128, 0, 0),       // maroon
+    Color::Blue,                 // ANSI blue
+    Color::Rgb(139, 69, 19),     // saddle brown
 ];
 
 pub fn color_at_idx(idx: u8) -> Color {

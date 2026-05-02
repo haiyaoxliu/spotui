@@ -58,7 +58,7 @@ pub struct Theme {
     pub highlight_fg: Color,
     /// Border color for the right-column "shared" panes (NowPlaying / Queue /
     /// Jam) when a jam is active, plus the status-bar `jam:*` chip background.
-    /// Defaults to dark green so it reads as "linked".
+    /// Defaults to green so it reads as "linked".
     pub jam: Color,
 }
 
@@ -70,7 +70,7 @@ impl Theme {
             warn: Color::Yellow,
             dim: Color::DarkGray,
             highlight_fg: Color::Black,
-            jam: Color::Rgb(0, 100, 0),
+            jam: Color::Green,
         }
     }
 

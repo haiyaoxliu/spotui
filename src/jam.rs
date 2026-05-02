@@ -195,23 +195,44 @@ impl HostState {
         }
     }
 
-    /// Walk the polled queue and tag each track with its submitter by
-    /// "find-first-then-remove" against the ledger. Items not in the ledger
-    /// (e.g. queued from another device) are tagged `None`. Then broadcast the
-    /// attributed queue to all connected clients and return it for local use.
+    /// Walk the polled queue and tag each track with its submitter, preferring
+    /// the previous attributed queue (so a track keeps its color across polls
+    /// even once the ledger entry has been consumed) and falling back to the
+    /// ledger for newly-submitted items. Then broadcast the attributed queue
+    /// to all connected clients and return it for local use.
     pub fn attribute_and_broadcast_queue(
         &mut self,
         polled: Vec<TrackRef>,
+        prev: &[QueueEntry],
     ) -> Vec<QueueEntry> {
+        // Slot-by-slot prev attribution per uri: pop_front so duplicates of
+        // the same uri preserve their individual attributions.
+        let mut prev_slots: HashMap<&str, VecDeque<Option<ParticipantId>>> =
+            HashMap::new();
+        for e in prev {
+            prev_slots
+                .entry(e.track.uri.as_str())
+                .or_default()
+                .push_back(e.submitter);
+        }
+
         let mut entries = Vec::with_capacity(polled.len());
         for t in polled {
-            let pos = self.attribution.iter().position(|(u, _)| u == &t.uri);
-            let submitter = pos.map(|p| {
-                let (_, id) = self.attribution.remove(p).unwrap();
-                id
-            });
+            let from_prev: Option<ParticipantId> = prev_slots
+                .get_mut(t.uri.as_str())
+                .and_then(|q| q.pop_front())
+                .flatten();
+            let submitter = if from_prev.is_some() {
+                from_prev
+            } else {
+                // Either prev didn't have this uri, or had it unattributed —
+                // either way, a fresh ledger entry can claim the slot.
+                let pos = self.attribution.iter().position(|(u, _)| u == &t.uri);
+                pos.and_then(|p| self.attribution.remove(p).map(|(_, id)| id))
+            };
             entries.push(QueueEntry { track: t, submitter });
         }
+
         let msg = HostMsg::QueueUpdated {
             queue: entries.clone(),
         };

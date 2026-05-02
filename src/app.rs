@@ -190,6 +190,11 @@ pub struct App {
     pub listing: Option<ListingState>,
 
     pub queue: Vec<jam::QueueEntry>,
+    /// Smoothing flag: when a queue poll returns empty and the current queue
+    /// is non-empty, we treat it as a Spotify-side transient (track
+    /// transitions, post-add inconsistency) and skip the update once. Set on
+    /// skip; cleared when we accept a real update.
+    pub queue_empty_pending: bool,
     pub queue_state: ListState,
 
     pub search: SearchState,
@@ -227,6 +232,7 @@ impl App {
             listing: None,
             queue: Vec::new(),
             queue_state: ListState::default(),
+            queue_empty_pending: false,
             search: SearchState {
                 query: String::new(),
                 results: Vec::new(),
@@ -631,10 +637,22 @@ async fn apply_action(
             if matches!(app.jam, jam::JamState::Client(_)) {
                 return;
             }
-            // Host attributes via the ledger and broadcasts in one step.
-            // Idle just wraps with `submitter: None`.
+            // Smoothing: a one-off "queue suddenly empty" poll is treated as
+            // a Spotify-side transient (track transitions, post-add
+            // inconsistency that often shows up right after a client `q`).
+            // Skip once; the next poll either confirms (real empty) or
+            // recovers to the actual queue.
+            if q.is_empty() && !app.queue.is_empty() && !app.queue_empty_pending {
+                app.queue_empty_pending = true;
+                return;
+            }
+            app.queue_empty_pending = false;
+
+            // Host attributes against the ledger AND the previous queue (for
+            // stability across polls), then broadcasts. Idle just wraps with
+            // `submitter: None`.
             let entries: Vec<jam::QueueEntry> = if let jam::JamState::Host(h) = &mut app.jam {
-                h.attribute_and_broadcast_queue(q)
+                h.attribute_and_broadcast_queue(q, &app.queue)
             } else {
                 q.into_iter()
                     .map(|t| jam::QueueEntry {
@@ -1363,7 +1381,10 @@ fn open_end_jam_confirm(app: &mut App) {
 fn open_join_overlay(app: &mut App, tx: &mpsc::UnboundedSender<Action>) {
     let browse_handle = jam_net::start_browse(tx.clone());
     app.overlay = Overlay::Join {
-        sub_focus: JoinField::Host,
+        // Default to Discovered — even when the list is briefly empty on
+        // open, mDNS results land within ~1s and the user is already focused
+        // for an enter-to-join.
+        sub_focus: JoinField::Discovered,
         host_input: String::new(),
         code_input: String::new(),
         discovered: Vec::new(),

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -207,6 +208,12 @@ pub struct App {
     /// to build the `spotify:user:<id>:collection` context URI for Liked Songs.
     pub me_id: Option<String>,
 
+    /// Track URI → saved-in-library? Persisted across runs (`cache::load_liked`).
+    /// Built progressively: hydrated via GET /me/library/contains for tracks
+    /// surfaced in listings/search/now-playing, and updated optimistically when
+    /// the user presses `l`. Absence = unknown (will be hydrated on next view).
+    pub liked_cache: HashMap<String, bool>,
+
     pub overlay: Overlay,
 
     pub theme: Theme,
@@ -243,6 +250,7 @@ impl App {
             },
             me_name: None,
             me_id: None,
+            liked_cache: HashMap::new(),
             overlay: Overlay::None,
             theme,
             cfg,
@@ -292,6 +300,19 @@ pub enum Action {
     DevicesLoaded(Vec<DeviceRef>),
     DevicesError(String),
     MeLoaded { display_name: String, id: String },
+
+    /// Result of a background `GET /me/library/contains` hydration. Each entry
+    /// is `(track_uri, saved)`; merged into `app.liked_cache`.
+    LibraryHydrated(Vec<(String, bool)>),
+    /// Result of an optimistic `l` toggle. On `Err`, roll the cache entry back
+    /// to `prior_saved`; on `Ok`, just flash a success status.
+    LibraryToggleResult {
+        uri: String,
+        track_name: String,
+        intended_saved: bool,
+        prior_saved: bool,
+        error: Option<String>,
+    },
 
     // Jam — host side.
     JamHostStarted {
@@ -427,6 +448,7 @@ async fn run_inner(
     });
 
     let mut app = App::new(cfg, paths);
+    app.liked_cache = cache.load_liked();
 
     if let Some((age, cached)) = cache.load_playlists() {
         app.playlists = cached;
@@ -490,6 +512,35 @@ async fn run_inner(
     Ok(())
 }
 
+/// Fire-and-forget GET /me/library/contains for any track URIs we don't have
+/// cached yet. Results merge into `app.liked_cache` via `Action::LibraryHydrated`.
+fn hydrate_library_unknown_uris(
+    app: &App,
+    spotify: &AuthCodePkceSpotify,
+    tx: &mpsc::UnboundedSender<Action>,
+    uris: Vec<String>,
+) {
+    let unknown: Vec<String> = uris
+        .into_iter()
+        .filter(|u| u.starts_with("spotify:track:") && !app.liked_cache.contains_key(u))
+        .collect();
+    if unknown.is_empty() {
+        return;
+    }
+    let s = spotify.clone();
+    let tx_inner = tx.clone();
+    tokio::spawn(async move {
+        match spotify::library_contains(&s, &unknown).await {
+            Ok(results) => {
+                let _ = tx_inner.send(Action::LibraryHydrated(results));
+            }
+            Err(e) => {
+                tracing::warn!("library hydrate: {e}");
+            }
+        }
+    });
+}
+
 async fn apply_action(
     app: &mut App,
     action: Action,
@@ -505,11 +556,24 @@ async fn apply_action(
             // than our own; the local poller keeps running but its results
             // are dropped here.
             if !matches!(app.jam, jam::JamState::Client(_)) {
+                let prior_uri = app
+                    .playback
+                    .as_ref()
+                    .and_then(|pb| pb.track_uri.clone());
+                let next_uri = p.as_ref().and_then(|pb| pb.track_uri.clone());
                 app.playback = p.clone();
                 if let jam::JamState::Host(h) = &app.jam {
                     let msg = jam::HostMsg::PlaybackUpdated { playback: p };
                     for tx in h.senders.values() {
                         let _ = tx.send(msg.clone());
+                    }
+                }
+                // Hydrate the saved-state of the now-playing track only when
+                // it changes — playback polls every poll_ms, we don't want to
+                // fire /me/library/contains each tick.
+                if next_uri.is_some() && next_uri != prior_uri {
+                    if let Some(uri) = next_uri {
+                        hydrate_library_unknown_uris(app, spotify, tx, vec![uri]);
                     }
                 }
             }
@@ -552,6 +616,9 @@ async fn apply_action(
             is_first,
             is_last,
         } => {
+            // Capture this page's URIs before the move into l.tracks so we can
+            // hydrate saved-state below.
+            let page_uris: Vec<String> = tracks.iter().map(|t| t.uri.clone()).collect();
             // Apply the page to the open listing if it still matches.
             if let Some(l) = app.listing.as_mut() {
                 if l.playlist_id == playlist_id {
@@ -578,6 +645,28 @@ async fn apply_action(
                             ));
                         }
                     }
+                }
+            }
+
+            // Hydrate saved-state for this page. The synthetic Liked Songs
+            // playlist short-circuits — every URI returned by /me/tracks is
+            // by definition saved, so mark them directly without a /contains
+            // round-trip. Other playlists go through the lazy hydrator.
+            if !page_uris.is_empty() {
+                if playlist_id == spotify::LIKED_PLAYLIST_ID {
+                    let mut changed = false;
+                    for u in &page_uris {
+                        if app.liked_cache.insert(u.clone(), true) != Some(true) {
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        if let Err(e) = cache.save_liked(&app.liked_cache) {
+                            tracing::warn!("liked cache persist: {e}");
+                        }
+                    }
+                } else {
+                    hydrate_library_unknown_uris(app, spotify, tx, page_uris);
                 }
             }
 
@@ -674,6 +763,13 @@ async fn apply_action(
                     let cur = prior.unwrap_or(0).min(app.search.results.len() - 1);
                     app.search.state.select(Some(cur));
                 }
+                let uris: Vec<String> = app
+                    .search
+                    .results
+                    .iter()
+                    .map(|t| t.uri.clone())
+                    .collect();
+                hydrate_library_unknown_uris(app, spotify, tx, uris);
             }
         }
         Action::SearchError { seq, error } => {
@@ -706,6 +802,46 @@ async fn apply_action(
             app.me_name = Some(display_name);
             app.me_id = Some(id);
         }
+        Action::LibraryHydrated(results) => {
+            if results.is_empty() {
+                return;
+            }
+            for (uri, saved) in results {
+                app.liked_cache.insert(uri, saved);
+            }
+            if let Err(e) = cache.save_liked(&app.liked_cache) {
+                tracing::warn!("liked cache persist: {e}");
+            }
+        }
+        Action::LibraryToggleResult {
+            uri,
+            track_name,
+            intended_saved,
+            prior_saved,
+            error,
+        } => match error {
+            None => {
+                let (verb, prep) = if intended_saved {
+                    ("saved", "to")
+                } else {
+                    ("removed", "from")
+                };
+                app.status = Some(format!("✓ {verb} {track_name} {prep} Liked"));
+                if let Err(persist) = cache.save_liked(&app.liked_cache) {
+                    tracing::warn!("liked cache persist (toggle): {persist}");
+                }
+                let _ = uri;
+            }
+            Some(e) => {
+                // Optimistic flip already wrote `intended_saved` into the
+                // cache; HTTP failed, so roll back to whatever we had before.
+                app.liked_cache.insert(uri, prior_saved);
+                if let Err(persist) = cache.save_liked(&app.liked_cache) {
+                    tracing::warn!("liked cache persist (rollback): {persist}");
+                }
+                app.status = Some(format!("✗ library {} failed: {e}", if intended_saved { "save" } else { "remove" }));
+            }
+        },
 
         // ---- Jam (host) ----
         Action::JamHostStarted {
@@ -1040,6 +1176,7 @@ async fn handle_key(
         (Char('g'), false) => move_cursor_to(app, 0),
         (Char('G'), false) => move_cursor_to_end(app),
         (Char('a'), false) => add_to_open_playlist(app, spotify, tx),
+        (Char('l'), false) => toggle_library_for_focus(app, spotify, tx),
         (Char('R'), false) => trigger_reload(app, spotify, cache, tx),
         (Char('n'), false) => skip_track(app, spotify, tx, true),
         (Char('p'), false) => skip_track(app, spotify, tx, false),
@@ -1665,6 +1802,12 @@ fn handle_search_key(
         add_to_open_playlist(app, spotify, tx);
         return;
     }
+    // Always-on Ctrl-L: toggle Liked Songs on cursor result (so the user can
+    // like/unlike without leaving the search input to type the bare `l`).
+    if matches!(key.code, Char('l')) && ctrl {
+        toggle_library_for_focus(app, spotify, tx);
+        return;
+    }
     // Always-on Tab/BackTab: cycle panes (out of search).
     if matches!(key.code, Tab) {
         app.focus = Pane::Search.next();
@@ -1741,6 +1884,7 @@ fn handle_search_results_key(
         Char('q') => queue_search_selection(app, spotify, tx),
         Char('Q') => play_search_selection_now(app, spotify, tx),
         Char('a') => add_to_open_playlist(app, spotify, tx),
+        Char('l') => toggle_library_for_focus(app, spotify, tx),
         Char('/') => {
             app.search.sub_focus = SearchSubFocus::Input;
         }
@@ -2026,6 +2170,92 @@ fn play_search_selection(
             }
         }
     });
+}
+
+// ---------- Library toggle (Liked Songs) ----------
+
+/// Returns `(uri, name)` of the track `l` should act on, given current focus.
+/// Mirrors the existing dispatch but is more specific than `add_to_open_playlist`:
+/// in Listing/Queue we use the *cursor* row (the user is looking right at it),
+/// in Search Results the cursor result, and otherwise the now-playing track.
+fn library_toggle_target(app: &App) -> Option<(String, String)> {
+    match app.focus {
+        Pane::Search if matches!(app.search.sub_focus, SearchSubFocus::Results) => {
+            let i = app.search.state.selected()?;
+            let t = app.search.results.get(i)?;
+            Some((t.uri.clone(), t.name.clone()))
+        }
+        Pane::Search => {
+            // Search input sub-focus: ctrl-l routes here. Use cursor result if
+            // any, else first result.
+            let i = app.search.state.selected().unwrap_or(0);
+            let t = app.search.results.get(i)?;
+            Some((t.uri.clone(), t.name.clone()))
+        }
+        Pane::Listing => {
+            let l = app.listing.as_ref()?;
+            let i = l.state.selected()?;
+            let t = l.tracks.get(i)?;
+            Some((t.uri.clone(), t.name.clone()))
+        }
+        Pane::Queue => {
+            let i = app.queue_state.selected()?;
+            let q = app.queue.get(i)?;
+            Some((q.track.uri.clone(), q.track.name.clone()))
+        }
+        // Library / NowPlaying / Jam → fall back to the playing track.
+        _ => {
+            let p = app.playback.as_ref()?;
+            let uri = p.track_uri.clone()?;
+            Some((uri, p.track.clone().unwrap_or_default()))
+        }
+    }
+}
+
+fn toggle_library_for_focus(
+    app: &mut App,
+    spotify: &AuthCodePkceSpotify,
+    tx: &mpsc::UnboundedSender<Action>,
+) {
+    let Some((uri, name)) = library_toggle_target(app) else {
+        app.status = Some("no track to toggle (no cursor / nothing playing)".to_string());
+        return;
+    };
+    if !uri.starts_with("spotify:track:") {
+        app.status = Some("only tracks can be toggled in Liked Songs".to_string());
+        return;
+    }
+    let prior_saved = app.liked_cache.get(&uri).copied().unwrap_or(false);
+    let intended_saved = !prior_saved;
+
+    // Optimistic flip — the UI repaints from `liked_cache` so the ♥ updates
+    // immediately. Roll back in `Action::LibraryToggleResult` on HTTP failure;
+    // disk persist also happens there (success or rollback) so the cache file
+    // stays consistent with memory.
+    app.liked_cache.insert(uri.clone(), intended_saved);
+
+    let s = spotify.clone();
+    let tx_inner = tx.clone();
+    let uri_for_task = uri.clone();
+    let name_for_task = name.clone();
+    tokio::spawn(async move {
+        let result = if intended_saved {
+            spotify::save_to_library(&s, &[uri_for_task.clone()]).await
+        } else {
+            spotify::remove_from_library(&s, &[uri_for_task.clone()]).await
+        };
+        let error = result.err().map(|e| format!("{e}"));
+        let _ = tx_inner.send(Action::LibraryToggleResult {
+            uri: uri_for_task,
+            track_name: name_for_task,
+            intended_saved,
+            prior_saved,
+            error,
+        });
+    });
+
+    let preview = if intended_saved { "♥" } else { "○" };
+    app.status = Some(format!("{preview} {name}"));
 }
 
 // ---------- Add to open playlist ----------

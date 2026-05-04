@@ -605,6 +605,83 @@ pub async fn add_to_queue(
     Ok(())
 }
 
+// Spotify caps /me/library calls at 40 URIs per request (per the OpenAPI spec
+// at /me/library — see spotify-openapi.local.yaml).
+const LIBRARY_CHUNK: usize = 40;
+
+pub async fn save_to_library(client: &AuthCodePkceSpotify, uris: &[String]) -> Result<()> {
+    if uris.is_empty() {
+        return Ok(());
+    }
+    let tok = token(client).await?;
+    for chunk in uris.chunks(LIBRARY_CHUNK) {
+        let url = format!("{API}/me/library?uris={}", chunk.join(","));
+        let resp = http()
+            .put(&url)
+            .bearer_auth(&tok)
+            .header(reqwest::header::CONTENT_LENGTH, "0")
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("PUT /me/library → {status}: {body}");
+        }
+    }
+    Ok(())
+}
+
+pub async fn remove_from_library(client: &AuthCodePkceSpotify, uris: &[String]) -> Result<()> {
+    if uris.is_empty() {
+        return Ok(());
+    }
+    let tok = token(client).await?;
+    for chunk in uris.chunks(LIBRARY_CHUNK) {
+        let url = format!("{API}/me/library?uris={}", chunk.join(","));
+        let resp = http().delete(&url).bearer_auth(&tok).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("DELETE /me/library → {status}: {body}");
+        }
+    }
+    Ok(())
+}
+
+/// Returns `(uri, saved)` pairs for every URI in `uris` (preserving order
+/// across chunks). `GET /me/library/contains?uris=…`, max 40 per call.
+pub async fn library_contains(
+    client: &AuthCodePkceSpotify,
+    uris: &[String],
+) -> Result<Vec<(String, bool)>> {
+    if uris.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tok = token(client).await?;
+    let mut out = Vec::with_capacity(uris.len());
+    for chunk in uris.chunks(LIBRARY_CHUNK) {
+        let url = format!("{API}/me/library/contains?uris={}", chunk.join(","));
+        let resp = http().get(&url).bearer_auth(&tok).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("GET /me/library/contains → {status}: {body}");
+        }
+        let bools: Vec<bool> = resp.json().await?;
+        if bools.len() != chunk.len() {
+            bail!(
+                "GET /me/library/contains: response length {} mismatched chunk size {}",
+                bools.len(),
+                chunk.len()
+            );
+        }
+        for (uri, saved) in chunk.iter().zip(bools) {
+            out.push((uri.clone(), saved));
+        }
+    }
+    Ok(out)
+}
+
 pub async fn add_tracks_to_playlist(
     client: &AuthCodePkceSpotify,
     playlist_id: &str,

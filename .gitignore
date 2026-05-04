@@ -12,3 +12,10 @@
 # Local environment
 .env
 .env.local
+
+# Local design / planning notes (not for upstream)
+JAM_PLAN.md
+*.local.md
+
+# Local copy of the Spotify Web API OpenAPI spec (reference only)
+spotify-openapi.local.yaml

@@ -505,11 +505,12 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    // Columns: # | name (collapse) | artists | album | duration
+    // Columns: ▶ | ♥ | # | name (collapse) | artists | album | duration
     let inner_w = (area.width as usize).saturating_sub(2 + HIGHLIGHT_PREFIX_W);
     let num_w = 4usize;
     let dur_w = 6usize;
-    let rest = inner_w.saturating_sub(num_w + dur_w + 3);
+    let heart_w = 2usize; // "♥ " or "  "
+    let rest = inner_w.saturating_sub(num_w + dur_w + heart_w + 3);
     // Fixed-ish budgets for artists/album so we don't constantly re-flow.
     let artists_w = (rest * 25 / 100).max(8);
     let album_w = (rest * 25 / 100).max(8);
@@ -520,13 +521,20 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
         .as_ref()
         .and_then(|p| p.track_uri.as_deref());
 
+    // Within the Liked Songs view: option (b) — when a track has been unliked
+    // this session (cache says false) we keep its row visually but dim it
+    // until the next reload. Outside Liked Songs: nothing dims for "unsaved".
+    let in_liked_view = l.playlist_id == crate::spotify::LIKED_PLAYLIST_ID;
     let items: Vec<ListItem> = l
         .tracks
         .iter()
         .enumerate()
         .map(|(i, t)| {
             let is_now = now_playing_uri.map_or(false, |u| u == t.uri);
+            let saved = app.liked_cache.get(&t.uri).copied().unwrap_or(false);
+            let unliked_in_liked = in_liked_view && !saved;
             let marker = if is_now { "▶" } else { " " };
+            let heart = if saved { "♥ " } else { "  " };
             let num = format!("{:>2} ", i + 1);
             let name = pad(&t.name, name_w);
             let artists = pad(&t.artists, artists_w);
@@ -536,6 +544,8 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
                 Style::default()
                     .fg(theme.success)
                     .add_modifier(Modifier::BOLD)
+            } else if unliked_in_liked {
+                Style::default().fg(theme.dim)
             } else {
                 Style::default().fg(Color::Reset)
             };
@@ -544,6 +554,7 @@ fn render_listing(f: &mut Frame, area: Rect, app: &mut App) {
                     format!("{marker} "),
                     Style::default().fg(theme.success),
                 ),
+                Span::styled(heart, Style::default().fg(theme.success)),
                 Span::styled(num, Style::default().fg(theme.dim)),
                 Span::styled(name, name_style),
                 Span::raw(" "),
@@ -597,7 +608,8 @@ fn render_search_results(f: &mut Frame, area: Rect, app: &mut App) {
 
     let inner_w = (area.width as usize).saturating_sub(2 + HIGHLIGHT_PREFIX_W);
     let dur_w = 6usize;
-    let rest = inner_w.saturating_sub(dur_w + 2);
+    let heart_w = 2usize;
+    let rest = inner_w.saturating_sub(dur_w + heart_w + 2);
     let artists_w = (rest * 28 / 100).max(6);
     let album_w = (rest * 25 / 100).max(6);
     let name_w = rest.saturating_sub(artists_w + album_w);
@@ -607,11 +619,14 @@ fn render_search_results(f: &mut Frame, area: Rect, app: &mut App) {
         .results
         .iter()
         .map(|t| {
+            let saved = app.liked_cache.get(&t.uri).copied().unwrap_or(false);
+            let heart = if saved { "♥ " } else { "  " };
             let name = pad(&t.name, name_w);
             let artists = pad(&t.artists, artists_w);
             let album = pad(&t.album, album_w);
             let dur = format!(" {:>5}", fmt_ms(t.duration_ms));
             ListItem::new(Line::from(vec![
+                Span::styled(heart, Style::default().fg(app.theme.success)),
                 Span::styled(name, Style::default().fg(Color::Reset)),
                 Span::raw(" "),
                 Span::styled(artists, Style::default().fg(app.theme.accent)),

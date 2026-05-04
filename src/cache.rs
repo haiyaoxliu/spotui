@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -19,6 +20,14 @@ struct TracksFile {
     version: u32,
     snapshot_id: String,
     tracks: Vec<TrackRef>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LikedFile {
+    version: u32,
+    /// URI → saved? (`true` = in Liked Songs / library, `false` = explicitly
+    /// known to be unsaved). Absence means we've never checked.
+    entries: HashMap<String, bool>,
 }
 
 const VERSION: u32 = 1;
@@ -109,6 +118,39 @@ impl Cache {
         };
         write_atomic(
             &self.tracks_path(playlist_id),
+            serde_json::to_string(&file)?.as_bytes(),
+        )
+    }
+
+    fn liked_path(&self) -> PathBuf {
+        self.root.join("liked.json")
+    }
+
+    pub fn load_liked(&self) -> HashMap<String, bool> {
+        let path = self.liked_path();
+        if !path.exists() {
+            return HashMap::new();
+        }
+        let Ok(body) = fs::read_to_string(&path) else {
+            return HashMap::new();
+        };
+        let Ok(file): std::result::Result<LikedFile, _> = serde_json::from_str(&body) else {
+            return HashMap::new();
+        };
+        if file.version != VERSION {
+            return HashMap::new();
+        }
+        file.entries
+    }
+
+    pub fn save_liked(&self, entries: &HashMap<String, bool>) -> Result<()> {
+        ensure_dir(&self.root)?;
+        let file = LikedFile {
+            version: VERSION,
+            entries: entries.clone(),
+        };
+        write_atomic(
+            &self.liked_path(),
             serde_json::to_string(&file)?.as_bytes(),
         )
     }

@@ -73,6 +73,7 @@ The Client ID and refresh token are persisted at `~/Library/Application Support/
 | `n` / `p` | Next / previous track |
 | `[` / `]`, `←` / `→` | Seek -5s / +5s (←/→ only on Now Playing) |
 | `+` / `-` | Volume +5 / -5 |
+| `l` | Toggle Liked Songs on the focus track (cursor in Listing/Queue/Search results, otherwise the playing track) |
 | `R` | Reload library |
 | `d` | Device picker |
 | `shift-C` | Color picker |
@@ -111,6 +112,7 @@ The pane has two sub-focuses — input (the bar) and results (the list above).
 | _typing_      | Live query (180ms debounce)           |
 | `↓` / `enter` | Jump focus to results                 |
 | `ctrl-a`      | Add cursor result to open playlist    |
+| `ctrl-l`      | Toggle Liked Songs on cursor result   |
 | `esc`         | Defocus pane                          |
 
 | Key (results) | Action                                |
@@ -118,6 +120,7 @@ The pane has two sub-focuses — input (the bar) and results (the list above).
 | `enter`       | Play                                  |
 | `q` / `Q`     | Queue / play-now                      |
 | `a`           | Add to open playlist                  |
+| `l`           | Toggle Liked Songs on cursor result   |
 | `/`           | Back to input                         |
 
 ## Colors
@@ -141,7 +144,7 @@ Values may be a named color (`black`, `red`, `green`, `yellow`, `blue`, `magenta
 |---|---|
 | `~/Library/Application Support/spotui/config.toml` | Client ID, redirect port, default device |
 | `~/Library/Application Support/spotui/token.json` | OAuth refresh token (sensitive) |
-| `~/Library/Caches/spotui/` | Playlist + track metadata cache (snapshot-keyed) |
+| `~/Library/Caches/spotui/` | Playlist + track metadata cache (snapshot-keyed); also `liked.json` (Liked Songs lookup) |
 | `~/Library/Application Support/spotui/log/spotui.log` | Daily-rotated debug log |
 
 To reset state (re-auth, clear cache), delete the contents of those directories.
@@ -181,6 +184,36 @@ src/
 ```
 
 See [`DEVLOG.md`](DEVLOG.md) for design decisions and version history.
+
+## Spotify Web API reference (for contributors / AI agents)
+
+When adding or changing any HTTP call against `api.spotify.com`, consult the
+upstream OpenAPI spec rather than relying on memory or older docs — Spotify has
+been migrating endpoints and several heavily-used routes are now marked
+`deprecated: true`.
+
+Fetch a local copy (gitignored) into the repo root before starting work:
+
+```sh
+curl -sSL -o spotify-openapi.local.yaml \
+  https://developer.spotify.com/reference/web-api/open-api-schema.yaml
+```
+
+Then grep it for the endpoint you're touching, e.g. `grep -n '/me/library' spotify-openapi.local.yaml`.
+
+Notable currently-deprecated endpoints (do **not** introduce new callers):
+
+- `PUT/DELETE /me/tracks`, `/me/albums`, `/me/episodes`, `/me/shows`,
+  `/me/audiobooks`, `/me/following` — all superseded by
+  `PUT/DELETE /me/library?uris=…` (max **40 URIs per call**, comma-separated).
+- `GET /me/tracks/contains` (and the per-type `/contains` siblings) — superseded
+  by `GET /me/library/contains?uris=…`.
+- `GET /me/tracks` itself is **not** deprecated; only the per-type write/check
+  routes are. Read paths the app already uses (e.g. `GET /me/tracks?limit=…`)
+  are fine to keep.
+
+When in doubt, the spec is the source of truth — `deprecated: true` on an
+operation is the signal to switch to the unified `/me/library` route.
 
 ## License
 

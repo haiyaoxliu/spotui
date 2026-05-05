@@ -23,7 +23,7 @@ const ROW: Binding[] = [
   { keys: 'click', action: 'Focus row (does not play)' },
   { keys: 'double-click  /  Enter', action: 'Play focused row' },
   { keys: 'q', action: 'Queue focused track' },
-  { keys: 'Q  (shift+q)', action: 'Play focused track stand-alone' },
+  { keys: 'p', action: 'Play focused track stand-alone' },
   { keys: 'a', action: 'Add focused track to open playlist' },
   { keys: 'l', action: 'Like / unlike focused track (or playing)' },
 ]

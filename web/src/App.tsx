@@ -247,7 +247,7 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           void queueFocused()
           break
-        case 'Q':
+        case 'p':
           e.preventDefault()
           void playFocusedTrackOnly(refresh)
           break

@@ -17,6 +17,8 @@ A keyboard-first Spotify controller for the terminal. Multi-pane TUI for browsin
  library  ↑/↓ move • enter open • / search • R reload                              ctrl-c quit
 ```
 
+> Also in this repo: a browser-based adaptation of the same controller in [`web/`](web/) — local-only Vite + React SPA, same Spotify app registration. See [Web companion](#web-companion-web) below.
+
 ## Requirements
 
 - macOS (Terminal.app, iTerm2) or any modern Unix terminal
@@ -184,6 +186,56 @@ src/
 ```
 
 See [`DEVLOG.md`](DEVLOG.md) for design decisions and version history.
+
+## Web companion (`web/`)
+
+A browser-based adaptation of the same controller. Drives the same Spotify Connect device pool (phone, desktop client, speaker) and shares the registered redirect URI (`http://127.0.0.1:8888/callback`), so the Spotify dashboard app you set up for the TUI is reused as-is.
+
+Stack: Vite + React 18 + TypeScript + Tailwind + Zustand. Local-only SPA, PKCE auth, tokens in `localStorage`, no backend.
+
+### Setup
+
+```sh
+cd web
+npm install
+cp .env.example .env.local        # paste your Client ID into VITE_SPOTIFY_CLIENT_ID
+npm run dev                       # http://127.0.0.1:8888
+```
+
+The dev server is pinned to port 8888 so it matches the registered redirect URI.
+
+### Keybinds
+
+Mouse selection drives focus; keypresses act on the focused row. Modifiers fire when no input is focused.
+
+| Key | Action |
+|---|---|
+| `space` | Play / pause |
+| `j` / `→` | Next |
+| `k` / `←` | Previous |
+| `s` | Toggle shuffle |
+| `r` | Cycle repeat (off → context → track) |
+| `,` / `.` | Seek -10s / +10s |
+| `-` / `=` / `+` | Volume -5 / +5 |
+| `l` | Toggle Liked Songs on the playing track |
+| `d` | Open device picker |
+| `/` | Focus search |
+
+### Project layout
+
+```
+web/
+  index.html
+  vite.config.ts
+  src/
+    main.tsx, App.tsx, commands.ts, styles.css
+    auth/        PKCE flow, token cache (localStorage)
+    api/         fetch wrapper + typed Spotify client
+    components/  Library, SelectedPlaylist, TransportBar, NowPlaying, Queue, DevicePicker, RightPanel
+    store/       zustand stores (player, library, search, selection, ui)
+```
+
+State (PKCE refresh tokens) lives in `localStorage`; nothing touches disk. Clear site data in DevTools to reset auth.
 
 ## Spotify Web API reference (for contributors / AI agents)
 

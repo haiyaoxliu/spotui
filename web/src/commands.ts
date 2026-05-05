@@ -1,0 +1,181 @@
+import {
+  next,
+  pause,
+  play,
+  previous,
+  removeFromLibrary,
+  saveToLibrary,
+  seek,
+  setRepeat,
+  setShuffle,
+  setVolume,
+} from './api/spotify'
+import { usePlayer } from './store/player'
+
+// After a transport action, Spotify Connect needs a moment to propagate the
+// new state. Refresh too soon and we risk overwriting our optimistic update
+// with a stale response. ~300ms feels snappy without flicker.
+const PROPAGATION_DELAY_MS = 300
+
+// Per-field suppression: while active, refresh() in App.tsx preserves the
+// locally-set value for that field and lets others update normally.
+const SUPPRESS_MS = 1500
+let suppress = {
+  isPlaying: 0,
+  shuffle: 0,
+  repeat: 0,
+  volume: 0,
+  position: 0,
+}
+
+export function isIsPlayingSuppressed(): boolean {
+  return Date.now() < suppress.isPlaying
+}
+export function isShuffleSuppressed(): boolean {
+  return Date.now() < suppress.shuffle
+}
+export function isRepeatSuppressed(): boolean {
+  return Date.now() < suppress.repeat
+}
+export function isVolumeSuppressed(): boolean {
+  return Date.now() < suppress.volume
+}
+export function isPositionSuppressed(): boolean {
+  return Date.now() < suppress.position
+}
+
+export type Refresh = () => void | Promise<void>
+
+export async function togglePlayPause(refresh: Refresh): Promise<void> {
+  const cur = usePlayer.getState().playback
+  if (!cur) return
+  const wasPlaying = cur.is_playing
+  usePlayer.getState().optimisticIsPlaying(!wasPlaying)
+  suppress.isPlaying = Date.now() + SUPPRESS_MS
+  try {
+    await (wasPlaying ? pause() : play())
+  } catch (e) {
+    suppress.isPlaying = 0
+    console.error('toggle play/pause failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+export async function skipNext(refresh: Refresh): Promise<void> {
+  try {
+    await next()
+  } catch (e) {
+    console.error('skip next failed:', e)
+    void refresh()
+    return
+  }
+  void refresh()
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS * 2)
+}
+
+export async function skipPrevious(refresh: Refresh): Promise<void> {
+  try {
+    await previous()
+  } catch (e) {
+    console.error('skip previous failed:', e)
+    void refresh()
+    return
+  }
+  void refresh()
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS * 2)
+}
+
+export async function toggleShuffle(refresh: Refresh): Promise<void> {
+  const cur = usePlayer.getState().playback
+  if (!cur) return
+  const next = !cur.shuffle_state
+  usePlayer.getState().patchPlayback({ shuffle_state: next })
+  suppress.shuffle = Date.now() + SUPPRESS_MS
+  try {
+    await setShuffle(next)
+  } catch (e) {
+    suppress.shuffle = 0
+    console.error('toggle shuffle failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+export async function cycleRepeat(refresh: Refresh): Promise<void> {
+  const cur = usePlayer.getState().playback
+  if (!cur) return
+  const order: Array<'off' | 'context' | 'track'> = ['off', 'context', 'track']
+  const idx = order.indexOf(cur.repeat_state)
+  const nextState = order[(idx + 1) % order.length]
+  usePlayer.getState().patchPlayback({ repeat_state: nextState })
+  suppress.repeat = Date.now() + SUPPRESS_MS
+  try {
+    await setRepeat(nextState)
+  } catch (e) {
+    suppress.repeat = 0
+    console.error('cycle repeat failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+export async function adjustVolume(delta: number, refresh: Refresh): Promise<void> {
+  const cur = usePlayer.getState().playback
+  if (!cur || !cur.device) return
+  const current = cur.device.volume_percent ?? 50
+  const target = Math.max(0, Math.min(100, current + delta))
+  if (target === current) return
+  usePlayer.getState().patchDevice({ volume_percent: target })
+  suppress.volume = Date.now() + SUPPRESS_MS
+  try {
+    await setVolume(target)
+  } catch (e) {
+    suppress.volume = 0
+    console.error('adjust volume failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+export async function adjustSeek(deltaMs: number, refresh: Refresh): Promise<void> {
+  const cur = usePlayer.getState().playback
+  if (!cur || cur.progress_ms == null) return
+  const duration = cur.item?.duration_ms ?? Infinity
+  const target = Math.max(0, Math.min(duration, cur.progress_ms + deltaMs))
+  usePlayer.getState().patchPlayback({ progress_ms: target })
+  suppress.position = Date.now() + 800
+  try {
+    await seek(target)
+  } catch (e) {
+    suppress.position = 0
+    console.error('seek failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+export async function toggleLikeCurrent(): Promise<void> {
+  const playback = usePlayer.getState().playback
+  const item = playback?.item
+  if (!item || item.type !== 'track') return
+  const wasLiked = usePlayer.getState().liked
+  if (wasLiked === null) return // unknown — wait until we've checked
+  const next = !wasLiked
+  usePlayer.getState().setLiked(next)
+  try {
+    if (wasLiked) {
+      await removeFromLibrary([item.uri])
+    } else {
+      await saveToLibrary([item.uri])
+    }
+  } catch (e) {
+    usePlayer.getState().setLiked(wasLiked)
+    console.error('toggle like failed:', e)
+  }
+}

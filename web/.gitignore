@@ -1,0 +1,14 @@
+# Local planning / scratch — not for the repo
+devlog/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+.DS_Store
+
+# Env / secrets
+.env
+.env.local
+.env.*.local

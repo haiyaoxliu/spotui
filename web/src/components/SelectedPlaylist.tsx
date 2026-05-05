@@ -10,6 +10,7 @@ import {
   type Track,
 } from '../api/spotify'
 import type { Refresh } from '../commands'
+import { LoadMoreFooter } from './LoadMoreFooter'
 
 type Tab = 'tracks' | 'albums' | 'artists' | 'playlists'
 
@@ -48,6 +49,9 @@ export function SelectedPlaylist({
   const loading = useSelection((s) => s.loading)
   const error = useSelection((s) => s.error)
   const canEditSelection = useSelection((s) => s.canEdit)
+  const tracksNextPath = useSelection((s) => s.tracksNextPath)
+  const loadingMoreTracks = useSelection((s) => s.loadingMoreTracks)
+  const loadMoreTracks = useSelection((s) => s.loadMoreTracks)
 
   const query = useSearch((s) => s.query)
   const setQuery = useSearch((s) => s.setQuery)
@@ -171,7 +175,8 @@ export function SelectedPlaylist({
             </p>
           )}
           {filteredTracks.length > 0 && (
-            <ul className="overflow-auto flex-1 min-h-0">
+            <div className="overflow-auto flex-1 min-h-0">
+              <ul>
               {filteredTracks.map((t, idx) => {
                 const artists = t.artists.map((a) => a.name).join(', ')
                 const isFocused =
@@ -210,7 +215,18 @@ export function SelectedPlaylist({
                   </li>
                 )
               })}
-            </ul>
+              </ul>
+              {(kind === 'playlist' || kind === 'liked') && !hasQuery && (
+                <LoadMoreFooter
+                  loadingMore={loadingMoreTracks}
+                  hasMore={tracksNextPath !== null}
+                  loadedCount={tracks.length}
+                  total={trackCount}
+                  onLoadMore={() => void loadMoreTracks()}
+                  label="Load more tracks"
+                />
+              )}
+            </div>
           )}
         </>
       )}

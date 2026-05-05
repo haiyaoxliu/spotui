@@ -1,11 +1,18 @@
 import { create } from 'zustand'
-import type { Playlist, PlaylistItem, SimplifiedAlbum, Track } from '../api/spotify'
+import type {
+  Playlist,
+  PlaylistItem,
+  SavedTrack,
+  SimplifiedAlbum,
+  Track,
+} from '../api/spotify'
 import {
+  fetchPage,
   getAlbumTracks,
-  getPlaylistItems,
-  getPlaylistItemsViaFull,
+  getPlaylistFirstSliceViaFull,
   getRecentlyPlayed,
-  getSavedTracks,
+  PLAYLIST_ITEMS_PAGE_PATH,
+  SAVED_TRACKS_PAGE_PATH,
 } from '../api/spotify'
 
 export type SelectedKind = 'playlist' | 'album' | 'liked' | 'recent'
@@ -35,6 +42,12 @@ interface SelectionState {
   tracks: Track[]
   loading: boolean
   error: string | null
+  // Pagination state for the loaded track list. Set by the initial selectXxx
+  // and consumed by loadMoreTracks. nextPath is null when fully loaded or
+  // when the kind doesn't paginate (album, recent, search-sourced read-only
+  // playlist).
+  tracksNextPath: string | null
+  loadingMoreTracks: boolean
   // The reference object backing the current selection, if any. Held so
   // that goBack can re-select by passing the original object back into the
   // matching selectXxx.
@@ -45,6 +58,7 @@ interface SelectionState {
   selectAlbum: (a: SimplifiedAlbum) => Promise<void>
   selectLiked: () => Promise<void>
   selectRecent: () => Promise<void>
+  loadMoreTracks: () => Promise<void>
   goBack: () => Promise<void>
 }
 
@@ -84,6 +98,8 @@ export const useSelection = create<SelectionState>((set, get) => {
     tracks: [],
     loading: false,
     error: null,
+    tracksNextPath: null,
+    loadingMoreTracks: false,
     lastPlaylist: null,
     lastAlbum: null,
     prior: null,
@@ -103,6 +119,8 @@ export const useSelection = create<SelectionState>((set, get) => {
         tracks: [],
         loading: true,
         error: null,
+        tracksNextPath: null,
+        loadingMoreTracks: false,
         lastPlaylist: p,
         lastAlbum: null,
         prior,
@@ -118,20 +136,27 @@ export const useSelection = create<SelectionState>((set, get) => {
         return
       }
       try {
-        const items = canEdit
-          ? await getPlaylistItems(p.id)
-          : await getPlaylistItemsViaFull(p.id)
-        const tracks = items
+        const slice = canEdit
+          ? await fetchPage<PlaylistItem>(PLAYLIST_ITEMS_PAGE_PATH(p.id))
+          : await getPlaylistFirstSliceViaFull(p.id)
+        const tracks = slice.items
           .map((i: PlaylistItem) => i.item ?? i.track ?? null)
           .filter((t): t is Track => !!t && t.type === 'track')
         const totalDurationMs = tracks.reduce((acc, t) => acc + t.duration_ms, 0)
         let minAddedAt: string | null = null
-        for (const i of items) {
+        for (const i of slice.items) {
           if (i.added_at && (minAddedAt === null || i.added_at < minAddedAt)) {
             minAddedAt = i.added_at
           }
         }
-        set({ tracks, totalDurationMs, minAddedAt, loading: false })
+        set({
+          tracks,
+          totalDurationMs,
+          minAddedAt,
+          tracksNextPath: slice.nextPath,
+          trackCount: slice.total ?? get().trackCount,
+          loading: false,
+        })
       } catch (e) {
         set({ error: e instanceof Error ? e.message : String(e), loading: false })
       }
@@ -153,6 +178,8 @@ export const useSelection = create<SelectionState>((set, get) => {
         tracks: [],
         loading: true,
         error: null,
+        tracksNextPath: null,
+        loadingMoreTracks: false,
         lastPlaylist: null,
         lastAlbum: a,
         prior,
@@ -186,13 +213,23 @@ export const useSelection = create<SelectionState>((set, get) => {
         tracks: [],
         loading: true,
         error: null,
+        tracksNextPath: null,
+        loadingMoreTracks: false,
         lastPlaylist: null,
         lastAlbum: null,
         prior,
       })
       try {
-        const items = await getSavedTracks()
-        set({ tracks: items.map((i) => i.track), loading: false })
+        const slice = await fetchPage<SavedTrack>(SAVED_TRACKS_PAGE_PATH)
+        const tracks = slice.items.map((i) => i.track)
+        const totalDurationMs = tracks.reduce((acc, t) => acc + t.duration_ms, 0)
+        set({
+          tracks,
+          totalDurationMs,
+          tracksNextPath: slice.nextPath,
+          trackCount: slice.total,
+          loading: false,
+        })
       } catch (e) {
         set({ error: e instanceof Error ? e.message : String(e), loading: false })
       }
@@ -213,6 +250,8 @@ export const useSelection = create<SelectionState>((set, get) => {
         tracks: [],
         loading: true,
         error: null,
+        tracksNextPath: null,
+        loadingMoreTracks: false,
         lastPlaylist: null,
         lastAlbum: null,
         prior,
@@ -231,6 +270,53 @@ export const useSelection = create<SelectionState>((set, get) => {
         set({ tracks, loading: false })
       } catch (e) {
         set({ error: e instanceof Error ? e.message : String(e), loading: false })
+      }
+    },
+
+    loadMoreTracks: async () => {
+      const state = get()
+      if (!state.tracksNextPath || state.loadingMoreTracks) return
+      // Only playlist + liked paginate; album / recent / search-sourced
+      // read-only playlist all set tracksNextPath to null upstream.
+      if (state.kind !== 'playlist' && state.kind !== 'liked') return
+      set({ loadingMoreTracks: true })
+      try {
+        if (state.kind === 'playlist') {
+          const slice = await fetchPage<PlaylistItem>(state.tracksNextPath)
+          const newTracks = slice.items
+            .map((i: PlaylistItem) => i.item ?? i.track ?? null)
+            .filter((t): t is Track => !!t && t.type === 'track')
+          let minAddedAt = state.minAddedAt
+          for (const i of slice.items) {
+            if (i.added_at && (minAddedAt === null || i.added_at < minAddedAt)) {
+              minAddedAt = i.added_at
+            }
+          }
+          const addedDuration = newTracks.reduce((acc, t) => acc + t.duration_ms, 0)
+          set({
+            tracks: [...state.tracks, ...newTracks],
+            tracksNextPath: slice.nextPath,
+            totalDurationMs: (state.totalDurationMs ?? 0) + addedDuration,
+            minAddedAt,
+            loadingMoreTracks: false,
+          })
+        } else {
+          // liked
+          const slice = await fetchPage<SavedTrack>(state.tracksNextPath)
+          const newTracks = slice.items.map((i) => i.track)
+          const addedDuration = newTracks.reduce((acc, t) => acc + t.duration_ms, 0)
+          set({
+            tracks: [...state.tracks, ...newTracks],
+            tracksNextPath: slice.nextPath,
+            totalDurationMs: (state.totalDurationMs ?? 0) + addedDuration,
+            loadingMoreTracks: false,
+          })
+        }
+      } catch (e) {
+        set({
+          error: e instanceof Error ? e.message : String(e),
+          loadingMoreTracks: false,
+        })
       }
     },
 

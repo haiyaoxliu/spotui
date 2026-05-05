@@ -167,43 +167,30 @@ export async function fetchPage<T>(path: string): Promise<PageSlice<T>> {
 
 export const PLAYLISTS_PAGE_PATH = '/me/playlists?limit=50'
 
-// GET /playlists/{id}/items returns 403 for playlists not owned by or
-// collaborated on by the current user (spec line 1193). Use this only for
-// editable selections; non-owned (e.g. pinned Spotify-curated playlists like
-// Discover Weekly) need getPlaylistItemsViaFull below.
-export async function getPlaylistItems(playlistId: string, max = 500): Promise<PlaylistItem[]> {
-  return fetchAllPages<PlaylistItem>(`/playlists/${playlistId}/items?limit=100`, max)
-}
-
 // Fallback for non-owned/collab playlists: GET /playlists/{id} (spec line
 // 848) has no ownership restriction and returns a full PlaylistObject with
-// embedded paged items. We pull the first page out of the response, then
-// follow `items.next` for the rest using the same pagination as elsewhere.
-export async function getPlaylistItemsViaFull(
+// embedded paged items. Returns the first slice; subsequent pages use the
+// returned nextPath via fetchPage<PlaylistItem> like a normal paged route.
+export async function getPlaylistFirstSliceViaFull(
   playlistId: string,
-  max = 500,
-): Promise<PlaylistItem[]> {
+): Promise<PageSlice<PlaylistItem>> {
   const full = await api<{ items?: Page<PlaylistItem> | null }>(
     `/playlists/${playlistId}`,
   )
   const firstPage = full?.items
-  if (!firstPage) return []
-  const all: PlaylistItem[] = [...firstPage.items]
-  let nextPath: string | null = firstPage.next
-    ? firstPage.next.replace('https://api.spotify.com/v1', '')
-    : null
-  while (nextPath && all.length < max) {
-    const page: Page<PlaylistItem> | null = await api<Page<PlaylistItem>>(nextPath)
-    if (!page) break
-    all.push(...page.items)
-    nextPath = page.next ? page.next.replace('https://api.spotify.com/v1', '') : null
+  if (!firstPage) return { items: [], nextPath: null, total: null }
+  return {
+    items: firstPage.items,
+    nextPath: firstPage.next
+      ? firstPage.next.replace('https://api.spotify.com/v1', '')
+      : null,
+    total: typeof firstPage.total === 'number' ? firstPage.total : null,
   }
-  return all
 }
 
-export async function getSavedTracks(max = 200): Promise<SavedTrack[]> {
-  return fetchAllPages<SavedTrack>('/me/tracks?limit=50', max)
-}
+export const PLAYLIST_ITEMS_PAGE_PATH = (id: string) =>
+  `/playlists/${id}/items?limit=100`
+export const SAVED_TRACKS_PAGE_PATH = '/me/tracks?limit=50'
 
 // Album tracks come from /albums/{id}/tracks as SimplifiedTrack objects: no
 // embedded album field (since they're already nested under the album).

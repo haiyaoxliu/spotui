@@ -131,6 +131,8 @@ export async function cycleRepeat(refresh: Refresh): Promise<void> {
 export async function adjustVolume(delta: number, refresh: Refresh): Promise<void> {
   const cur = usePlayer.getState().playback
   if (!cur || !cur.device) return
+  // iOS devices report supports_volume:false; PUT /me/player/volume 403s.
+  if (cur.device.supports_volume === false) return
   const current = cur.device.volume_percent ?? 50
   const target = Math.max(0, Math.min(100, current + delta))
   if (target === current) return

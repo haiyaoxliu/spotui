@@ -32,6 +32,11 @@ export function TransportBar({
   const repeat = playback?.repeat_state ?? 'off'
   const volume = device?.volume_percent ?? null
   const disabled = !playback
+  const volumeSupported = device?.supports_volume !== false
+  const volumeDisabled = disabled || !volumeSupported
+  const volumeTitle = !volumeSupported
+    ? 'Volume control not supported on this device'
+    : undefined
 
   // Width-driven swap between the slider and a +/- group. Only matters in
   // compact mode (the bottom transport always has plenty of room).
@@ -111,9 +116,13 @@ export function TransportBar({
   const barWidthClass = compact ? 'w-12' : 'w-20'
   const volumeBarUI = (
     <div
-      className="flex items-center gap-2 text-xs text-neutral-500 select-none"
+      className={
+        'flex items-center gap-2 text-xs text-neutral-500 select-none ' +
+        (volumeDisabled ? 'opacity-40' : '')
+      }
+      title={volumeTitle}
       onWheel={(e) => {
-        if (disabled) return
+        if (volumeDisabled) return
         e.preventDefault()
         void adjustVolume(e.deltaY > 0 ? -5 : 5, onAfterAction)
       }}
@@ -127,12 +136,12 @@ export function TransportBar({
   )
 
   const volumeButtonsUI = (
-    <div className="flex items-center gap-1 text-xs text-neutral-500 select-none">
+    <div className="flex items-center gap-1 text-xs text-neutral-500 select-none" title={volumeTitle}>
       <button
         onClick={() => void adjustVolume(-5, onAfterAction)}
-        disabled={disabled}
+        disabled={volumeDisabled}
         className="px-1.5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 leading-tight"
-        title="Volume -5 (-)"
+        title={volumeTitle ?? 'Volume -5 (-)'}
       >
         −
       </button>
@@ -141,9 +150,9 @@ export function TransportBar({
       </span>
       <button
         onClick={() => void adjustVolume(5, onAfterAction)}
-        disabled={disabled}
+        disabled={volumeDisabled}
         className="px-1.5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 leading-tight"
-        title="Volume +5 (=)"
+        title={volumeTitle ?? 'Volume +5 (=)'}
       >
         +
       </button>

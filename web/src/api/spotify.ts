@@ -188,6 +188,23 @@ export async function getSavedTracks(max = 200): Promise<SavedTrack[]> {
   return fetchAllPages<SavedTrack>('/me/tracks?limit=50', max)
 }
 
+// Album tracks come from /albums/{id}/tracks as SimplifiedTrack objects: no
+// embedded album field (since they're already nested under the album).
+// selectAlbum hydrates them to full Track shape using the SimplifiedAlbum we
+// already have from the search result.
+interface SimplifiedAlbumTrack {
+  id: string
+  name: string
+  uri: string
+  duration_ms: number
+  artists: Artist[]
+  type: 'track'
+}
+
+export async function getAlbumTracks(albumId: string, max = 200): Promise<SimplifiedAlbumTrack[]> {
+  return fetchAllPages<SimplifiedAlbumTrack>(`/albums/${albumId}/tracks?limit=50`, max)
+}
+
 export async function getRecentlyPlayed(): Promise<PlayHistoryItem[]> {
   const page = await api<CursorPage<PlayHistoryItem>>('/me/player/recently-played?limit=50')
   return page?.items ?? []

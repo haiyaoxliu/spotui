@@ -3,6 +3,7 @@ import { handleCallback, isLoggedIn, login, logout } from './auth/auth'
 import { api } from './api/client'
 import { checkLibraryContains, getPlaybackState, getQueue } from './api/spotify'
 import { usePlayer } from './store/player'
+import { useSelection } from './store/selection'
 import { useUI } from './store/ui'
 import {
   addFocusedToOpenPlaylist,
@@ -58,7 +59,10 @@ export function App() {
         }
         if (isLoggedIn()) {
           const data = await api<Me>('/me')
-          if (!cancelled && data) setMe(data)
+          if (!cancelled && data) {
+            setMe(data)
+            useUI.getState().setUserId(data.id)
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -130,6 +134,7 @@ function Player({ me }: { me: Me }) {
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
   const detailLayout = useUI((s) => s.detailLayout)
+  const goBack = useSelection((s) => s.goBack)
   const setTransportPosition = useUI((s) => s.setTransportPosition)
   const setSearchPosition = useUI((s) => s.setSearchPosition)
   const setDetailLayout = useUI((s) => s.setDetailLayout)
@@ -278,6 +283,10 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           openColorPicker()
           break
+        case 'b':
+          e.preventDefault()
+          void goBack()
+          break
       }
     }
     window.addEventListener('keydown', onKey)
@@ -290,6 +299,7 @@ function Player({ me }: { me: Me }) {
     openHelp,
     openColorPicker,
     focusSearch,
+    goBack,
     refresh,
   ])
 
@@ -366,6 +376,7 @@ function Player({ me }: { me: Me }) {
         <SelectedPlaylist
           onAfterPlay={() => void refresh()}
           searchPosition={searchPosition}
+          ownerId={me.id}
         />
         <RightPanel
           showTransport={transportPosition === 'right'}

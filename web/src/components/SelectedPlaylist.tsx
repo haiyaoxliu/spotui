@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSelection } from '../store/selection'
 import { useSearch } from '../store/search'
-import { useUI, type SearchPosition } from '../store/ui'
+import { useUI, type SearchPosition, type SearchResultType } from '../store/ui'
 import {
   play,
   type ArtistObject,
@@ -29,13 +29,17 @@ function formatDurationLong(ms: number): string {
 export function SelectedPlaylist({
   onAfterPlay,
   searchPosition,
+  ownerId,
 }: {
   onAfterPlay: Refresh
   searchPosition: SearchPosition
+  ownerId: string
 }) {
   const kind = useSelection((s) => s.kind)
   const name = useSelection((s) => s.name)
   const contextUri = useSelection((s) => s.contextUri)
+  const selectPlaylist = useSelection((s) => s.selectPlaylist)
+  const selectAlbum = useSelection((s) => s.selectAlbum)
   const owner = useSelection((s) => s.owner)
   const trackCount = useSelection((s) => s.trackCount)
   const totalDurationMs = useSelection((s) => s.totalDurationMs)
@@ -44,8 +48,6 @@ export function SelectedPlaylist({
   const loading = useSelection((s) => s.loading)
   const error = useSelection((s) => s.error)
   const canEditSelection = useSelection((s) => s.canEdit)
-  const prior = useSelection((s) => s.prior)
-  const goBack = useSelection((s) => s.goBack)
 
   const query = useSearch((s) => s.query)
   const setQuery = useSearch((s) => s.setQuery)
@@ -128,25 +130,14 @@ export function SelectedPlaylist({
               (detailLayout === 'right' ? 'flex items-baseline gap-3' : '')
             }
           >
-            <div
+            <h2
               className={
-                'flex items-baseline gap-2 ' +
+                'text-lg font-semibold truncate ' +
                 (detailLayout === 'right' ? 'flex-1 min-w-0' : '')
               }
             >
-              <button
-                onClick={() => void goBack()}
-                disabled={!prior}
-                className={
-                  'text-neutral-500 text-sm leading-none disabled:opacity-30 disabled:cursor-default hover:text-neutral-200 ' +
-                  '-ml-1 px-1'
-                }
-                title={prior ? 'Back to previous selection' : 'No previous selection'}
-              >
-                ‹
-              </button>
-              <h2 className="text-lg font-semibold truncate flex-1 min-w-0">{name}</h2>
-            </div>
+              {name}
+            </h2>
             <p
               className={
                 'text-xs text-neutral-500 truncate ' +
@@ -296,6 +287,7 @@ export function SelectedPlaylist({
             {tab === 'tracks' && (
               <ResultList
                 items={sTracks}
+                searchType="track"
                 render={(t: Track) => ({
                   key: t.id,
                   uri: t.uri,
@@ -310,19 +302,24 @@ export function SelectedPlaylist({
             {tab === 'albums' && (
               <ResultList
                 items={sAlbums}
+                searchType="album"
                 render={(a: SimplifiedAlbum) => ({
                   key: a.id,
                   uri: a.uri,
                   isTrack: false,
                   title: a.name,
                   subtitle: a.artists.map((x) => x.name).join(', '),
-                  onPlay: () => void playFromSearch(a.uri, 'context'),
+                  // Double-click loads the album into the playlist pane
+                  // (browse first), matching what Enter does on the focused
+                  // row. To play the album immediately, pick a track.
+                  onPlay: () => void selectAlbum(a),
                 })}
               />
             )}
             {tab === 'artists' && (
               <ResultList
                 items={sArtists}
+                searchType="artist"
                 render={(a: ArtistObject) => ({
                   key: a.id,
                   uri: a.uri,
@@ -336,13 +333,18 @@ export function SelectedPlaylist({
             {tab === 'playlists' && (
               <ResultList
                 items={sPlaylists}
+                searchType="playlist"
                 render={(p: Playlist) => ({
                   key: p.id,
                   uri: p.uri,
                   isTrack: false,
                   title: p.name,
                   subtitle: p.owner.display_name ?? '',
-                  onPlay: () => void playFromSearch(p.uri, 'context'),
+                  onPlay: () =>
+                    void selectPlaylist(
+                      p,
+                      p.owner.id === ownerId || p.collaborative,
+                    ),
                 })}
               />
             )}
@@ -373,9 +375,11 @@ export function SelectedPlaylist({
 
 function ResultList<T>({
   items,
+  searchType,
   render,
 }: {
   items: T[]
+  searchType: SearchResultType
   render: (item: T) => {
     key: string
     uri: string
@@ -402,7 +406,12 @@ function ResultList<T>({
           <li
             key={r.key}
             onClick={() =>
-              setFocusedRow({ pane: 'search', uri: r.uri, isTrack: r.isTrack })
+              setFocusedRow({
+                pane: 'search',
+                uri: r.uri,
+                isTrack: r.isTrack,
+                searchType,
+              })
             }
             onDoubleClick={r.onPlay}
             className={

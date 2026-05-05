@@ -4,14 +4,21 @@ export type TransportPosition = 'bottom' | 'right'
 export type SearchPosition = 'below' | 'above'
 
 // The "focused row" is the most recently clicked row in either the playlist
-// pane or the search-results pane. Action keys (q / Q / a / l / Enter) target
+// pane or the search-results pane. Action keys (q / p / a / l / Enter) target
 // this row instead of the playing track. Click sets focus; double-click or
 // Enter plays. `isTrack` gates q / a / l (only meaningful for tracks).
+//
+// `searchType` distinguishes the four search-result tabs so that Enter on a
+// playlist or album result loads it into the pane (matching dblclick),
+// while Enter on a track plays it. Set on search rows; null on playlist-pane
+// rows.
 export type FocusedRowPane = 'playlist' | 'search'
+export type SearchResultType = 'track' | 'album' | 'artist' | 'playlist'
 export interface FocusedRow {
   pane: FocusedRowPane
   uri: string
   isTrack: boolean
+  searchType?: SearchResultType
 }
 
 // Whether the secondary text on each row (artists / playlist owners / etc.)
@@ -72,6 +79,11 @@ interface UIState {
   // this; null when nothing is focused.
   focusedRow: FocusedRow | null
   setFocusedRow: (f: FocusedRow | null) => void
+  // Spotify user id of the logged-in account. Set once on login; needed by
+  // commands that compute editability (canEdit = owner.id === userId ||
+  // collaborative) without prop-drilling from App.
+  userId: string | null
+  setUserId: (id: string | null) => void
   // Layout prefs (persisted to localStorage).
   transportPosition: TransportPosition
   searchPosition: SearchPosition
@@ -113,6 +125,8 @@ export const useUI = create<UIState>((set) => ({
   focusSearch: () => set((s) => ({ searchFocusTick: s.searchFocusTick + 1 })),
   focusedRow: null,
   setFocusedRow: (focusedRow) => set({ focusedRow }),
+  userId: null,
+  setUserId: (userId) => set({ userId }),
   transportPosition: readTransport(),
   searchPosition: readSearch(),
   detailLayout: readDetail(),

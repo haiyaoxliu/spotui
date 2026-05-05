@@ -1,19 +1,21 @@
 import { create } from 'zustand'
-import type { Playlist, PlaylistItem, Track } from '../api/spotify'
+import type { Playlist, PlaylistItem, SimplifiedAlbum, Track } from '../api/spotify'
 import {
+  getAlbumTracks,
   getPlaylistItems,
   getPlaylistItemsViaFull,
   getRecentlyPlayed,
   getSavedTracks,
 } from '../api/spotify'
 
-export type SelectedKind = 'playlist' | 'liked' | 'recent'
+export type SelectedKind = 'playlist' | 'album' | 'liked' | 'recent'
 
 // One-step undo target — the selection that was active immediately before
 // the current one. Set on every selectXxx call (unless restoring from prior),
 // cleared after goBack(). Captures enough to re-trigger the original loader.
 type PriorSelection =
   | { kind: 'playlist'; playlist: Playlist; canEdit: boolean }
+  | { kind: 'album'; album: SimplifiedAlbum }
   | { kind: 'liked' }
   | { kind: 'recent' }
 
@@ -33,12 +35,14 @@ interface SelectionState {
   tracks: Track[]
   loading: boolean
   error: string | null
-  // The Playlist object backing the current selection, if any. Held so that
-  // goBack can re-select a previous playlist by passing the original object
-  // back into selectPlaylist.
+  // The reference object backing the current selection, if any. Held so
+  // that goBack can re-select by passing the original object back into the
+  // matching selectXxx.
   lastPlaylist: Playlist | null
+  lastAlbum: SimplifiedAlbum | null
   prior: PriorSelection | null
   selectPlaylist: (p: Playlist, canEdit: boolean) => Promise<void>
+  selectAlbum: (a: SimplifiedAlbum) => Promise<void>
   selectLiked: () => Promise<void>
   selectRecent: () => Promise<void>
   goBack: () => Promise<void>
@@ -47,6 +51,9 @@ interface SelectionState {
 function snapshotOf(s: SelectionState): PriorSelection | null {
   if (s.kind === 'playlist' && s.lastPlaylist) {
     return { kind: 'playlist', playlist: s.lastPlaylist, canEdit: s.canEdit }
+  }
+  if (s.kind === 'album' && s.lastAlbum) {
+    return { kind: 'album', album: s.lastAlbum }
   }
   if (s.kind === 'liked') return { kind: 'liked' }
   if (s.kind === 'recent') return { kind: 'recent' }
@@ -78,6 +85,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     loading: false,
     error: null,
     lastPlaylist: null,
+    lastAlbum: null,
     prior: null,
 
     selectPlaylist: async (p, canEdit) => {
@@ -96,6 +104,7 @@ export const useSelection = create<SelectionState>((set, get) => {
         loading: true,
         error: null,
         lastPlaylist: p,
+        lastAlbum: null,
         prior,
       })
       try {
@@ -122,6 +131,40 @@ export const useSelection = create<SelectionState>((set, get) => {
       }
     },
 
+    selectAlbum: async (a) => {
+      const prior = maybeCaptureprior()
+      const artistsLabel = a.artists.map((x) => x.name).join(', ')
+      set({
+        kind: 'album',
+        contextUri: a.uri,
+        contextId: a.id,
+        name: a.name,
+        owner: artistsLabel,
+        trackCount: a.total_tracks,
+        totalDurationMs: null,
+        minAddedAt: null,
+        canEdit: false,
+        tracks: [],
+        loading: true,
+        error: null,
+        lastPlaylist: null,
+        lastAlbum: a,
+        prior,
+      })
+      try {
+        const simplified = await getAlbumTracks(a.id)
+        // /albums/{id}/tracks returns SimplifiedTrack — no embedded album.
+        // Hydrate to full Track shape using the SimplifiedAlbum we already
+        // have (cover art / name / uri all live there).
+        const album = { id: a.id, name: a.name, uri: a.uri, images: a.images }
+        const tracks: Track[] = simplified.map((t) => ({ ...t, album }))
+        const totalDurationMs = tracks.reduce((acc, t) => acc + t.duration_ms, 0)
+        set({ tracks, totalDurationMs, loading: false })
+      } catch (e) {
+        set({ error: e instanceof Error ? e.message : String(e), loading: false })
+      }
+    },
+
     selectLiked: async () => {
       const prior = maybeCaptureprior()
       set({
@@ -138,6 +181,7 @@ export const useSelection = create<SelectionState>((set, get) => {
         loading: true,
         error: null,
         lastPlaylist: null,
+        lastAlbum: null,
         prior,
       })
       try {
@@ -164,6 +208,7 @@ export const useSelection = create<SelectionState>((set, get) => {
         loading: true,
         error: null,
         lastPlaylist: null,
+        lastAlbum: null,
         prior,
       })
       try {
@@ -189,6 +234,7 @@ export const useSelection = create<SelectionState>((set, get) => {
       restoring = true
       try {
         if (p.kind === 'playlist') await get().selectPlaylist(p.playlist, p.canEdit)
+        else if (p.kind === 'album') await get().selectAlbum(p.album)
         else if (p.kind === 'liked') await get().selectLiked()
         else if (p.kind === 'recent') await get().selectRecent()
       } finally {

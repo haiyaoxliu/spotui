@@ -14,6 +14,7 @@ import {
   setVolume,
 } from './api/spotify'
 import { usePlayer } from './store/player'
+import { useSearch } from './store/search'
 import { useSelection } from './store/selection'
 import { useUI } from './store/ui'
 
@@ -185,12 +186,39 @@ export async function queueFocused(): Promise<void> {
   }
 }
 
-// Play the focused row. Playlist-pane rows play in the open playlist's
-// context (so the rest of the playlist queues up after); search-pane track
-// rows play stand-alone; non-track search rows start their own context.
+// Enter / dblclick the focused row. Behavior branches on what the row is:
+//
+// - Playlist-pane row: play in the open context (rest of the playlist queues
+//   up after).
+// - Search row, type=track: play stand-alone.
+// - Search row, type=playlist or album: LOAD into the playlist pane (browse
+//   first, then the user can pick a track to play). Mirrors what dblclick
+//   does on those rows.
+// - Search row, type=artist (or fallback): start its context playing.
 export async function playFocused(refresh: Refresh): Promise<void> {
   const f = useUI.getState().focusedRow
   if (!f) return
+
+  if (f.pane === 'search' && f.searchType === 'playlist') {
+    const sel = useSelection.getState()
+    const ui = useUI.getState()
+    const pl = useSearch
+      .getState()
+      .results.playlists?.items.find((p) => p?.uri === f.uri)
+    if (pl) {
+      const canEdit = !!ui.userId && (pl.owner.id === ui.userId || pl.collaborative)
+      await sel.selectPlaylist(pl, canEdit)
+    }
+    return
+  }
+  if (f.pane === 'search' && f.searchType === 'album') {
+    const album = useSearch
+      .getState()
+      .results.albums?.items.find((a) => a.uri === f.uri)
+    if (album) await useSelection.getState().selectAlbum(album)
+    return
+  }
+
   try {
     if (f.pane === 'playlist') {
       const ctx = useSelection.getState().contextUri

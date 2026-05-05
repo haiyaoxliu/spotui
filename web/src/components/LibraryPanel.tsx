@@ -36,22 +36,30 @@ export function LibraryPanel({ ownerId }: { ownerId: string }) {
     void load()
   }, [load])
 
-  const rowClass = (active: boolean, external: boolean = false) =>
-    'flex-1 text-left px-4 py-2 text-sm truncate ' +
-    (active
-      ? 'bg-neutral-800 text-[var(--color-accent)]'
+  // Background lives on the <li> so the active stripe paints flush to the
+  // right edge (across the pin slot, even when ☆ is hidden). Inner buttons
+  // contribute only text color and padding.
+  const liClass = (active: boolean) =>
+    'flex items-center group ' +
+    (active ? 'bg-neutral-800' : 'hover:bg-neutral-800/40')
+
+  const titleClass = (active: boolean, external: boolean = false) => {
+    const color = active
+      ? 'text-[var(--color-accent)]'
       : external
-        ? 'text-[var(--color-external)] hover:bg-neutral-800'
-        : 'hover:bg-neutral-800')
+        ? 'text-[var(--color-external)]'
+        : ''
+    return `flex-1 text-left px-4 py-2 text-sm truncate ${color}`
+  }
 
   function PlaylistRow({ pl, pinned }: { pl: Playlist; pinned: boolean }) {
     const active = selKind === 'playlist' && selContextUri === pl.uri
     const editable = canEdit(pl)
     return (
-      <li className="flex items-center group hover:bg-neutral-800/40">
+      <li className={liClass(active)}>
         <button
           onClick={() => void selectPlaylist(pl, editable)}
-          className={rowClass(active, !editable)}
+          className={titleClass(active, !editable)}
           title={editable ? pl.name : `${pl.name} (read-only)`}
         >
           {pl.name}
@@ -81,18 +89,18 @@ export function LibraryPanel({ ownerId }: { ownerId: string }) {
       </div>
       <div className="overflow-auto flex-1">
         <ul>
-          <li>
+          <li className={liClass(selKind === 'liked')}>
             <button
               onClick={() => void selectLiked()}
-              className={'w-full ' + rowClass(selKind === 'liked')}
+              className={titleClass(selKind === 'liked')}
             >
               Liked Songs
             </button>
           </li>
-          <li>
+          <li className={liClass(selKind === 'recent')}>
             <button
               onClick={() => void selectRecent()}
-              className={'w-full ' + rowClass(selKind === 'recent')}
+              className={titleClass(selKind === 'recent')}
             >
               Recently Played
             </button>

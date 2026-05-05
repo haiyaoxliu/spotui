@@ -43,6 +43,9 @@ export function SelectedPlaylist({
   const tracks = useSelection((s) => s.tracks)
   const loading = useSelection((s) => s.loading)
   const error = useSelection((s) => s.error)
+  const canEditSelection = useSelection((s) => s.canEdit)
+  const prior = useSelection((s) => s.prior)
+  const goBack = useSelection((s) => s.goBack)
 
   const query = useSearch((s) => s.query)
   const setQuery = useSearch((s) => s.setQuery)
@@ -125,14 +128,25 @@ export function SelectedPlaylist({
               (detailLayout === 'right' ? 'flex items-baseline gap-3' : '')
             }
           >
-            <h2
+            <div
               className={
-                'text-lg font-semibold truncate ' +
+                'flex items-baseline gap-2 ' +
                 (detailLayout === 'right' ? 'flex-1 min-w-0' : '')
               }
             >
-              {name}
-            </h2>
+              <button
+                onClick={() => void goBack()}
+                disabled={!prior}
+                className={
+                  'text-neutral-500 text-sm leading-none disabled:opacity-30 disabled:cursor-default hover:text-neutral-200 ' +
+                  '-ml-1 px-1'
+                }
+                title={prior ? 'Back to previous selection' : 'No previous selection'}
+              >
+                ‹
+              </button>
+              <h2 className="text-lg font-semibold truncate flex-1 min-w-0">{name}</h2>
+            </div>
             <p
               className={
                 'text-xs text-neutral-500 truncate ' +
@@ -158,7 +172,11 @@ export function SelectedPlaylist({
           {error && <p className="px-6 py-4 text-sm text-red-400">{error}</p>}
           {!loading && !error && filteredTracks.length === 0 && (
             <p className="px-6 py-4 text-sm text-neutral-500">
-              {hasQuery ? 'No tracks match.' : 'No tracks.'}
+              {hasQuery
+                ? 'No tracks match.'
+                : kind === 'playlist' && !canEditSelection && tracks.length === 0
+                  ? 'Externally owned — cannot show tracks due to API limitation.'
+                  : 'No tracks.'}
             </p>
           )}
           {filteredTracks.length > 0 && (

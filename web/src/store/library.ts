@@ -3,7 +3,6 @@ import type { Playlist } from '../api/spotify'
 import { getMyPlaylists } from '../api/spotify'
 
 const PINNED_KEY = 'library_pinned_ids'
-const DW_AUTOPIN_KEY = 'discover_weekly_autopinned'
 
 function readPinned(): string[] {
   try {
@@ -43,22 +42,6 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     try {
       const playlists = await getMyPlaylists()
       set({ playlists, loaded: true, loading: false })
-      // One-time auto-pin for Discover Weekly. We only do this once, tracked
-      // by a localStorage flag, so an explicit unpin survives reloads.
-      if (!localStorage.getItem(DW_AUTOPIN_KEY)) {
-        const dw = playlists.find(
-          (p) => p.owner.id === 'spotify' && p.name === 'Discover Weekly',
-        )
-        if (dw) {
-          const cur = get().pinnedIds
-          if (!cur.includes(dw.id)) {
-            const next = [...cur, dw.id]
-            writePinned(next)
-            set({ pinnedIds: next })
-          }
-          localStorage.setItem(DW_AUTOPIN_KEY, '1')
-        }
-      }
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e), loading: false })
     }

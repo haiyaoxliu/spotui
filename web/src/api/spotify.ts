@@ -146,9 +146,26 @@ async function fetchAllPages<T>(initialPath: string, max = 1000): Promise<T[]> {
   return all
 }
 
-export async function getMyPlaylists(max = 200): Promise<Playlist[]> {
-  return fetchAllPages<Playlist>('/me/playlists?limit=50', max)
+// Single-page version of the same. Used by stores that paginate on demand
+// (loadMore-style) instead of pulling the whole collection up-front. The
+// returned `nextPath` is already stripped of the API base so the caller can
+// hand it straight back as the next URL.
+export interface PageSlice<T> {
+  items: T[]
+  nextPath: string | null
+  total: number | null
 }
+export async function fetchPage<T>(path: string): Promise<PageSlice<T>> {
+  const page = await api<Page<T>>(path)
+  if (!page) return { items: [], nextPath: null, total: null }
+  return {
+    items: page.items,
+    nextPath: page.next ? page.next.replace('https://api.spotify.com/v1', '') : null,
+    total: typeof page.total === 'number' ? page.total : null,
+  }
+}
+
+export const PLAYLISTS_PAGE_PATH = '/me/playlists?limit=50'
 
 // GET /playlists/{id}/items returns 403 for playlists not owned by or
 // collaborated on by the current user (spec line 1193). Use this only for

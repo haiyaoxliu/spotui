@@ -2,9 +2,23 @@ import { useEffect, useMemo } from 'react'
 import { useLibrary } from '../store/library'
 import { useSelection } from '../store/selection'
 import type { Playlist } from '../api/spotify'
+import { LoadMoreFooter } from './LoadMoreFooter'
 
 export function LibraryPanel({ ownerId }: { ownerId: string }) {
-  const { playlists, loaded, loading, error, pinnedIds, load, pin, unpin } = useLibrary()
+  const {
+    playlists,
+    loaded,
+    loading,
+    loadingMore,
+    error,
+    nextPath,
+    total,
+    pinnedIds,
+    load,
+    loadMore,
+    pin,
+    unpin,
+  } = useLibrary()
   const selectPlaylist = useSelection((s) => s.selectPlaylist)
   const selectLiked = useSelection((s) => s.selectLiked)
   const selectRecent = useSelection((s) => s.selectRecent)
@@ -122,6 +136,16 @@ export function LibraryPanel({ ownerId }: { ownerId: string }) {
             <PlaylistRow key={pl.id} pl={pl} pinned={false} />
           ))}
         </ul>
+        {loaded && (
+          <LoadMoreFooter
+            loadingMore={loadingMore}
+            hasMore={nextPath !== null}
+            loadedCount={playlists.length}
+            total={total}
+            onLoadMore={() => void loadMore()}
+            label="Load more playlists"
+          />
+        )}
       </div>
     </aside>
   )

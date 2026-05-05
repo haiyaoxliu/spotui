@@ -185,23 +185,26 @@ export async function queueFocused(): Promise<void> {
   }
 }
 
-// Enter / dblclick the focused row. Behavior branches on what the row is:
+// Enter / dblclick the focused row. The focused row is the single
+// "current selection" across library, search, and the playlist-pane track
+// list — clicking any of them shifts focus, so Enter always targets the
+// most recent click. Behavior:
 //
-// - Playlist-pane row: play in the open context (rest of the playlist queues
-//   up after).
-// - Search row, type=track: play stand-alone.
-// - Search row, type=playlist or album: LOAD into the playlist pane (browse
-//   first, then the user can pick a track to play). Mirrors what dblclick
-//   does on those rows.
-// - Search row, type=artist (or fallback): start its context playing.
+// - Non-track row (library playlist, search album/playlist/artist): play
+//   the row's context.
+// - Playlist-pane track: play in the open context (offset = this track).
+// - Search-result track: play stand-alone.
+// - No focus: fall back to the loaded selection's context, so Enter
+//   immediately after picking a library entry still does the right thing.
 export async function playFocused(refresh: Refresh): Promise<void> {
   const f = useUI.getState().focusedRow
-  if (!f) return
+  if (!f) {
+    const ctx = useSelection.getState().contextUri
+    if (ctx) await playContext(ctx, refresh)
+    return
+  }
 
-  // Enter on a focused playlist or album result starts playback in that
-  // context (single-click already loaded it into the pane). Track results
-  // play standalone; artists fall through to the generic context play below.
-  if (f.pane === 'search' && (f.searchType === 'playlist' || f.searchType === 'album')) {
+  if (!f.isTrack) {
     await playContext(f.uri, refresh)
     return
   }
@@ -211,10 +214,8 @@ export async function playFocused(refresh: Refresh): Promise<void> {
       const ctx = useSelection.getState().contextUri
       if (ctx) await play({ contextUri: ctx, offsetUri: f.uri })
       else await play({ uris: [f.uri] })
-    } else if (f.isTrack) {
-      await play({ uris: [f.uri] })
     } else {
-      await play({ contextUri: f.uri })
+      await play({ uris: [f.uri] })
     }
   } catch (e) {
     console.error('play focused failed:', e)

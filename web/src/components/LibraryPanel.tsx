@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useLibrary } from '../store/library'
 import { useSelection } from '../store/selection'
+import { useUI } from '../store/ui'
 import type { Playlist } from '../api/spotify'
 import { playContext, type Refresh } from '../commands'
 import { LoadMoreFooter } from './LoadMoreFooter'
@@ -31,6 +32,14 @@ export function LibraryPanel({
   const selectRecent = useSelection((s) => s.selectRecent)
   const selKind = useSelection((s) => s.kind)
   const selContextUri = useSelection((s) => s.contextUri)
+  const focusedRow = useUI((s) => s.focusedRow)
+  const setFocusedRow = useUI((s) => s.setFocusedRow)
+  // Library and search are mutually-exclusive "current selection" surfaces:
+  // when the user is focused on a search result, suppress the library
+  // highlight entirely. Other focus panes ('library', 'playlist', or null)
+  // leave the loaded-selection highlight visible — so clicking a track
+  // inside the open playlist doesn't make the library row appear unloaded.
+  const showLibSelection = focusedRow?.pane !== 'search'
 
   function canEdit(p: Playlist): boolean {
     return p.owner.id === ownerId || p.collaborative
@@ -74,14 +83,20 @@ export function LibraryPanel({
   }
 
   function PlaylistRow({ pl, pinned }: { pl: Playlist; pinned: boolean }) {
-    const active = selKind === 'playlist' && selContextUri === pl.uri
+    const active =
+      showLibSelection && selKind === 'playlist' && selContextUri === pl.uri
     const editable = canEdit(pl)
     return (
       <li className={liClass(active)}>
         <button
           // Single-click selects the playlist and loads it into the pane;
-          // double-click starts playback in the playlist's context.
-          onClick={() => void selectPlaylist(pl, editable)}
+          // double-click starts playback in the playlist's context. Setting
+          // focusedRow here makes Enter target this row and clears any stale
+          // focus from a prior search interaction.
+          onClick={() => {
+            setFocusedRow({ pane: 'library', uri: pl.uri, isTrack: false })
+            void selectPlaylist(pl, editable)
+          }}
           onDoubleClick={() => void playContext(pl.uri, onAfterAction)}
           className={titleClass(active, !editable)}
           title={
@@ -117,18 +132,24 @@ export function LibraryPanel({
       </div>
       <div className="overflow-auto flex-1">
         <ul>
-          <li className={liClass(selKind === 'liked')}>
+          <li className={liClass(showLibSelection && selKind === 'liked')}>
             <button
-              onClick={() => void selectLiked()}
-              className={titleClass(selKind === 'liked')}
+              onClick={() => {
+                setFocusedRow(null)
+                void selectLiked()
+              }}
+              className={titleClass(showLibSelection && selKind === 'liked')}
             >
               Liked Songs
             </button>
           </li>
-          <li className={liClass(selKind === 'recent')}>
+          <li className={liClass(showLibSelection && selKind === 'recent')}>
             <button
-              onClick={() => void selectRecent()}
-              className={titleClass(selKind === 'recent')}
+              onClick={() => {
+                setFocusedRow(null)
+                void selectRecent()
+              }}
+              className={titleClass(showLibSelection && selKind === 'recent')}
             >
               Recently Played
             </button>

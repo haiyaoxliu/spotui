@@ -3,16 +3,17 @@ import { create } from 'zustand'
 export type TransportPosition = 'bottom' | 'right'
 export type SearchPosition = 'below' | 'above'
 
-// The "focused row" is the most recently clicked row in either the playlist
-// pane or the search-results pane. Action keys (q / p / a / l / Enter) target
-// this row instead of the playing track. Click sets focus; double-click or
-// Enter plays. `isTrack` gates q / a / l (only meaningful for tracks).
+// The "focused row" is the user's most recently clicked row anywhere in the
+// app — a library entry, a search result, or a track inside the playlist
+// pane. Only one row across all three panes is ever "selected" at a time;
+// the previous one is implicitly cleared on the next click.
 //
-// `searchType` distinguishes the four search-result tabs so that Enter on a
-// playlist or album result loads it into the pane (matching dblclick),
-// while Enter on a track plays it. Set on search rows; null on playlist-pane
-// rows.
-export type FocusedRowPane = 'playlist' | 'search'
+// Action keys (q / p / a / l / Enter) target this row. Click sets focus;
+// double-click or Enter plays whatever it points at. `isTrack` gates q / a /
+// l (only meaningful for tracks). `searchType` distinguishes the four
+// search-result tabs so playFocused can decide between play-track,
+// play-context, etc.
+export type FocusedRowPane = 'library' | 'playlist' | 'search'
 export type SearchResultType = 'track' | 'album' | 'artist' | 'playlist'
 export interface FocusedRow {
   pane: FocusedRowPane

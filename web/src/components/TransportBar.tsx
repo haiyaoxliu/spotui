@@ -109,8 +109,12 @@ export function TransportBar({
           {playButtons}
           {modes}
         </div>
-        <ProgressBar onAfterAction={onAfterAction} />
-        {volumeUI}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <ProgressBar onAfterAction={onAfterAction} />
+          </div>
+          {volumeUI}
+        </div>
       </div>
     )
   }

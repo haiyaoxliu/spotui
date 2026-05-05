@@ -70,12 +70,12 @@ export function HelpOverlay() {
       onClick={close}
     >
       <div
-        className="bg-neutral-900 rounded-lg p-6 w-[640px] max-w-[92vw] max-h-[80vh] overflow-auto shadow-xl border border-neutral-800"
+        className="bg-white dark:bg-neutral-900 rounded-lg p-6 w-[640px] max-w-[92vw] max-h-[80vh] overflow-auto shadow-xl border border-neutral-200 dark:border-neutral-800"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-baseline justify-between mb-4">
           <h2 className="text-base font-semibold">Keybinds</h2>
-          <span className="text-neutral-500 text-xs">Esc or ? to close</span>
+          <span className="text-neutral-600 dark:text-neutral-500 text-xs">Esc or ? to close</span>
         </div>
         <Section title="Global" bindings={GLOBAL} />
         <Section title="Focused row (in playlist or search results)" bindings={ROW} />
@@ -90,12 +90,12 @@ export function HelpOverlay() {
 function Section({ title, bindings }: { title: string; bindings: Binding[] }) {
   return (
     <div className="mb-4 last:mb-0">
-      <h3 className="text-xs uppercase tracking-wider text-neutral-400 mb-2">{title}</h3>
+      <h3 className="text-xs uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">{title}</h3>
       <ul className="space-y-1">
         {bindings.map((b) => (
           <li key={b.keys} className="flex items-baseline gap-4 text-sm">
-            <span className="font-mono text-yellow-400 text-xs w-44 shrink-0">{b.keys}</span>
-            <span className="text-neutral-200">{b.action}</span>
+            <span className="font-mono text-yellow-700 dark:text-yellow-400 text-xs w-44 shrink-0">{b.keys}</span>
+            <span className="text-neutral-800 dark:text-neutral-200">{b.action}</span>
           </li>
         ))}
       </ul>

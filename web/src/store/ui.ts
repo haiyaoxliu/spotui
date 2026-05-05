@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export type TransportPosition = 'bottom' | 'right'
 export type SearchPosition = 'below' | 'above'
+export type Theme = 'dark' | 'light'
 
 // The "focused row" is the user's most recently clicked row anywhere in the
 // app — a library entry, a search result, or a track inside the playlist
@@ -30,12 +31,21 @@ export type DetailLayout = 'below' | 'right'
 const TRANSPORT_KEY = 'ui_transport_position'
 const SEARCH_KEY = 'ui_search_position'
 const DETAIL_KEY = 'ui_detail_layout'
-const ACCENT_KEY = 'ui_accent_color'
-const EXTERNAL_KEY = 'ui_external_color'
+const THEME_KEY = 'ui_theme'
+// Legacy single-color keys (pre-theme). Read once on first run as a
+// migration source for the dark-theme values, then ignored.
+const LEGACY_ACCENT_KEY = 'ui_accent_color'
+const LEGACY_EXTERNAL_KEY = 'ui_external_color'
+const ACCENT_DARK_KEY = 'ui_accent_color_dark'
+const ACCENT_LIGHT_KEY = 'ui_accent_color_light'
+const EXTERNAL_DARK_KEY = 'ui_external_color_dark'
+const EXTERNAL_LIGHT_KEY = 'ui_external_color_light'
 
-// Defaults match the CSS variable seed in styles.css.
-export const DEFAULT_ACCENT = '#4ade80'
-export const DEFAULT_EXTERNAL = '#a1a1aa'
+// Per-theme defaults — colors that read well on each background.
+export const DEFAULT_ACCENT_DARK = '#4ade80'
+export const DEFAULT_ACCENT_LIGHT = '#16a34a'
+export const DEFAULT_EXTERNAL_DARK = '#a1a1aa'
+export const DEFAULT_EXTERNAL_LIGHT = '#71717a'
 
 function readTransport(): TransportPosition {
   return localStorage.getItem(TRANSPORT_KEY) === 'right' ? 'right' : 'bottom'
@@ -46,16 +56,42 @@ function readSearch(): SearchPosition {
 function readDetail(): DetailLayout {
   return localStorage.getItem(DETAIL_KEY) === 'right' ? 'right' : 'below'
 }
-function readAccent(): string {
-  return localStorage.getItem(ACCENT_KEY) || DEFAULT_ACCENT
+function readTheme(): Theme {
+  return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'
 }
-function readExternal(): string {
-  return localStorage.getItem(EXTERNAL_KEY) || DEFAULT_EXTERNAL
+function readAccent(theme: Theme): string {
+  const key = theme === 'dark' ? ACCENT_DARK_KEY : ACCENT_LIGHT_KEY
+  const stored = localStorage.getItem(key)
+  if (stored) return stored
+  // One-time migration: if the user previously customized in single-theme
+  // mode, carry that value forward as their dark accent.
+  if (theme === 'dark') {
+    const legacy = localStorage.getItem(LEGACY_ACCENT_KEY)
+    if (legacy) return legacy
+  }
+  return theme === 'dark' ? DEFAULT_ACCENT_DARK : DEFAULT_ACCENT_LIGHT
+}
+function readExternal(theme: Theme): string {
+  const key = theme === 'dark' ? EXTERNAL_DARK_KEY : EXTERNAL_LIGHT_KEY
+  const stored = localStorage.getItem(key)
+  if (stored) return stored
+  if (theme === 'dark') {
+    const legacy = localStorage.getItem(LEGACY_EXTERNAL_KEY)
+    if (legacy) return legacy
+  }
+  return theme === 'dark' ? DEFAULT_EXTERNAL_DARK : DEFAULT_EXTERNAL_LIGHT
+}
+
+function applyTheme(theme: Theme): void {
+  const root = document.documentElement
+  if (theme === 'dark') root.classList.add('dark')
+  else root.classList.remove('dark')
 }
 
 function applyColors(accent: string, external: string): void {
-  document.documentElement.style.setProperty('--color-accent', accent)
-  document.documentElement.style.setProperty('--color-external', external)
+  const root = document.documentElement
+  root.style.setProperty('--color-accent', accent)
+  root.style.setProperty('--color-external', external)
 }
 
 interface UIState {
@@ -68,11 +104,19 @@ interface UIState {
   colorPickerOpen: boolean
   openColorPicker: () => void
   closeColorPicker: () => void
-  accentColor: string
-  externalColor: string
-  setAccentColor: (c: string) => void
-  setExternalColor: (c: string) => void
-  resetColors: () => void
+  // Theme + per-theme color profiles. The active --color-accent and
+  // --color-external CSS vars always reflect the current theme's pair, so
+  // consumers don't care which profile produced them.
+  theme: Theme
+  setTheme: (t: Theme) => void
+  toggleTheme: () => void
+  accentColorDark: string
+  accentColorLight: string
+  externalColorDark: string
+  externalColorLight: string
+  setAccentColor: (theme: Theme, c: string) => void
+  setExternalColor: (theme: Theme, c: string) => void
+  resetColors: (theme: Theme) => void
   // Increments on `/` keypress; the search input watches this and refocuses.
   searchFocusTick: number
   focusSearch: () => void
@@ -94,7 +138,13 @@ interface UIState {
   setDetailLayout: (l: DetailLayout) => void
 }
 
-export const useUI = create<UIState>((set) => ({
+const initialTheme = readTheme()
+const initialAccentDark = readAccent('dark')
+const initialAccentLight = readAccent('light')
+const initialExternalDark = readExternal('dark')
+const initialExternalLight = readExternal('light')
+
+export const useUI = create<UIState>((set, get) => ({
   devicePickerOpen: false,
   openDevicePicker: () => set({ devicePickerOpen: true }),
   closeDevicePicker: () => set({ devicePickerOpen: false }),
@@ -104,23 +154,67 @@ export const useUI = create<UIState>((set) => ({
   colorPickerOpen: false,
   openColorPicker: () => set({ colorPickerOpen: true }),
   closeColorPicker: () => set({ colorPickerOpen: false }),
-  accentColor: readAccent(),
-  externalColor: readExternal(),
-  setAccentColor: (c) => {
-    localStorage.setItem(ACCENT_KEY, c)
-    applyColors(c, readExternal())
-    set({ accentColor: c })
+  theme: initialTheme,
+  setTheme: (t) => {
+    localStorage.setItem(THEME_KEY, t)
+    applyTheme(t)
+    const s = get()
+    applyColors(
+      t === 'dark' ? s.accentColorDark : s.accentColorLight,
+      t === 'dark' ? s.externalColorDark : s.externalColorLight,
+    )
+    set({ theme: t })
   },
-  setExternalColor: (c) => {
-    localStorage.setItem(EXTERNAL_KEY, c)
-    applyColors(readAccent(), c)
-    set({ externalColor: c })
+  toggleTheme: () => {
+    const next: Theme = get().theme === 'dark' ? 'light' : 'dark'
+    get().setTheme(next)
   },
-  resetColors: () => {
-    localStorage.removeItem(ACCENT_KEY)
-    localStorage.removeItem(EXTERNAL_KEY)
-    applyColors(DEFAULT_ACCENT, DEFAULT_EXTERNAL)
-    set({ accentColor: DEFAULT_ACCENT, externalColor: DEFAULT_EXTERNAL })
+  accentColorDark: initialAccentDark,
+  accentColorLight: initialAccentLight,
+  externalColorDark: initialExternalDark,
+  externalColorLight: initialExternalLight,
+  setAccentColor: (theme, c) => {
+    localStorage.setItem(theme === 'dark' ? ACCENT_DARK_KEY : ACCENT_LIGHT_KEY, c)
+    set(theme === 'dark' ? { accentColorDark: c } : { accentColorLight: c })
+    if (get().theme === theme) {
+      applyColors(
+        c,
+        theme === 'dark' ? get().externalColorDark : get().externalColorLight,
+      )
+    }
+  },
+  setExternalColor: (theme, c) => {
+    localStorage.setItem(theme === 'dark' ? EXTERNAL_DARK_KEY : EXTERNAL_LIGHT_KEY, c)
+    set(theme === 'dark' ? { externalColorDark: c } : { externalColorLight: c })
+    if (get().theme === theme) {
+      applyColors(
+        theme === 'dark' ? get().accentColorDark : get().accentColorLight,
+        c,
+      )
+    }
+  },
+  resetColors: (theme) => {
+    if (theme === 'dark') {
+      localStorage.removeItem(ACCENT_DARK_KEY)
+      localStorage.removeItem(EXTERNAL_DARK_KEY)
+      set({
+        accentColorDark: DEFAULT_ACCENT_DARK,
+        externalColorDark: DEFAULT_EXTERNAL_DARK,
+      })
+      if (get().theme === 'dark') {
+        applyColors(DEFAULT_ACCENT_DARK, DEFAULT_EXTERNAL_DARK)
+      }
+    } else {
+      localStorage.removeItem(ACCENT_LIGHT_KEY)
+      localStorage.removeItem(EXTERNAL_LIGHT_KEY)
+      set({
+        accentColorLight: DEFAULT_ACCENT_LIGHT,
+        externalColorLight: DEFAULT_EXTERNAL_LIGHT,
+      })
+      if (get().theme === 'light') {
+        applyColors(DEFAULT_ACCENT_LIGHT, DEFAULT_EXTERNAL_LIGHT)
+      }
+    }
   },
   searchFocusTick: 0,
   focusSearch: () => set((s) => ({ searchFocusTick: s.searchFocusTick + 1 })),
@@ -145,6 +239,10 @@ export const useUI = create<UIState>((set) => ({
   },
 }))
 
-// Push the persisted colors into CSS variables on first import so the very
-// first paint already reflects user customization.
-applyColors(readAccent(), readExternal())
+// Push the persisted theme + colors before first paint so the initial render
+// already reflects the user's choices (no light-mode flash on a dark setup).
+applyTheme(initialTheme)
+applyColors(
+  initialTheme === 'dark' ? initialAccentDark : initialAccentLight,
+  initialTheme === 'dark' ? initialExternalDark : initialExternalLight,
+)

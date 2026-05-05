@@ -43,7 +43,7 @@ export function LoadMoreFooter({
   if (!hasMore && !loadingMore) {
     if (total != null && loadedCount > 0) {
       return (
-        <div className={`px-4 py-2 text-[11px] text-neutral-600 ${className}`}>
+        <div className={`px-4 py-2 text-[11px] text-neutral-500 dark:text-neutral-600 ${className}`}>
           {loadedCount} of {total} loaded
         </div>
       )
@@ -56,7 +56,7 @@ export function LoadMoreFooter({
       <button
         onClick={onLoadMore}
         disabled={loadingMore || !hasMore}
-        className="w-full text-xs text-neutral-400 hover:text-neutral-200 py-1 rounded border border-neutral-800 hover:border-neutral-700 disabled:opacity-40 disabled:cursor-default"
+        className="w-full text-xs text-neutral-600 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 py-1 rounded border border-neutral-200 hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700 disabled:opacity-40 disabled:cursor-default"
       >
         {loadingMore
           ? 'Loading…'

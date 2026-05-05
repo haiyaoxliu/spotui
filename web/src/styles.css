@@ -2,11 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme system. Tailwind handles the bg/text/border swaps via `dark:`
+ * variants on each component (darkMode: 'class' in tailwind.config.js).
+ * This file only owns the bits that don't fit the utility model:
+ *
+ *   - color-scheme so the browser themes its own UI (default scrollbars,
+ *     form widgets, autofill colors).
+ *   - Theme-aware custom scrollbar appearance.
+ *   - --color-accent / --color-external CSS variables that components read
+ *     directly (e.g. via text-[var(--color-accent)]) — these are
+ *     user-customizable per theme by the UI store.
+ */
+
 :root {
-  /* Accent color for selection / active state (focused row, active tab,
-     liked heart, playing indicator, etc.). Defaults to tailwind green-400. */
+  color-scheme: light;
+  --scrollbar-track: #f5f5f5;
+  --scrollbar-thumb: #c4c4c4;
+  --scrollbar-thumb-hover: #a3a3a3;
+  --color-accent: #16a34a;
+  --color-external: #71717a;
+}
+
+.dark {
+  color-scheme: dark;
+  --scrollbar-track: #171717;
+  --scrollbar-thumb: #404040;
+  --scrollbar-thumb-hover: #525252;
   --color-accent: #4ade80;
-  /* Text color for read-only playlists (non-owned, non-collab) in the
-     library list. Defaults to tailwind neutral-500. */
   --color-external: #a1a1aa;
+}
+
+/* Theme-aware scrollbars. Firefox uses `scrollbar-color`; Chromium/Safari
+   uses the ::-webkit-scrollbar pseudos. Both pull from the same vars so the
+   appearance flips with the theme. */
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
 }

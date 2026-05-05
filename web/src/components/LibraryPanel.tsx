@@ -71,7 +71,9 @@ export function LibraryPanel({
   // contribute only text color and padding.
   const liClass = (active: boolean) =>
     'flex items-center group ' +
-    (active ? 'bg-neutral-800' : 'hover:bg-neutral-800/40')
+    (active
+      ? 'bg-neutral-200 dark:bg-neutral-800'
+      : 'hover:bg-neutral-200/60 dark:hover:bg-neutral-800/40')
 
   const titleClass = (active: boolean, external: boolean = false) => {
     const color = active
@@ -112,8 +114,8 @@ export function LibraryPanel({
           className={
             'px-2 py-2 text-xs ' +
             (pinned
-              ? 'text-yellow-400'
-              : 'text-neutral-600 opacity-0 group-hover:opacity-100')
+              ? 'text-yellow-600 dark:text-yellow-400'
+              : 'text-neutral-400 dark:text-neutral-600 opacity-0 group-hover:opacity-100')
           }
           title={pinned ? 'Unpin' : 'Pin to top'}
         >
@@ -124,9 +126,9 @@ export function LibraryPanel({
   }
 
   return (
-    <aside className="border-r border-neutral-800 bg-neutral-900/40 w-64 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-neutral-800">
-        <h2 className="text-xs font-semibold uppercase text-neutral-400 tracking-wider">
+    <aside className="border-r border-neutral-200 dark:border-neutral-800 bg-neutral-100/60 dark:bg-neutral-900/40 w-64 flex flex-col overflow-hidden">
+      <div className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
+        <h2 className="text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400 tracking-wider">
           Library
         </h2>
       </div>
@@ -158,13 +160,13 @@ export function LibraryPanel({
             <PlaylistRow key={pl.id} pl={pl} pinned />
           ))}
         </ul>
-        <div className="border-t border-neutral-800 my-2" />
+        <div className="border-t border-neutral-200 dark:border-neutral-800 my-2" />
         {loading && (
-          <p className="px-4 py-2 text-sm text-neutral-500">Loading playlists…</p>
+          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">Loading playlists…</p>
         )}
-        {error && <p className="px-4 py-2 text-sm text-red-400">{error}</p>}
+        {error && <p className="px-4 py-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         {loaded && regularPlaylists.length === 0 && pinnedPlaylists.length === 0 && !error && (
-          <p className="px-4 py-2 text-sm text-neutral-500">No playlists.</p>
+          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">No playlists.</p>
         )}
         <ul>
           {regularPlaylists.map((pl) => (

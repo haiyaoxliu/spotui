@@ -10,13 +10,13 @@ export function QueuePanel() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div
         className={
-          'px-4 py-3 border-b border-neutral-800 ' +
+          'px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 ' +
           (detailLayout === 'right' ? 'flex items-baseline gap-3' : '')
         }
       >
         <h3
           className={
-            'text-xs font-semibold uppercase text-neutral-400 tracking-wider ' +
+            'text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400 tracking-wider ' +
             (detailLayout === 'right' ? 'flex-1 min-w-0 truncate' : '')
           }
         >
@@ -24,7 +24,7 @@ export function QueuePanel() {
         </h3>
         <p
           className={
-            'text-xs text-neutral-500 ' +
+            'text-xs text-neutral-600 dark:text-neutral-500 ' +
             (detailLayout === 'right' ? 'text-right' : '')
           }
         >
@@ -32,7 +32,7 @@ export function QueuePanel() {
         </p>
       </div>
       {items.length === 0 ? (
-        <p className="p-4 text-neutral-500 text-sm">Queue is empty.</p>
+        <p className="p-4 text-neutral-600 dark:text-neutral-500 text-sm">Queue is empty.</p>
       ) : (
         <ul className="overflow-auto">
           {items.map((item, idx) => {
@@ -44,7 +44,7 @@ export function QueuePanel() {
               <li
                 key={`${item.id}-${idx}`}
                 className={
-                  'px-4 py-2.5 border-b border-neutral-900 ' +
+                  'px-4 py-2.5 border-b border-neutral-100 dark:border-neutral-900 ' +
                   (detailLayout === 'right' ? 'flex items-center gap-3' : '')
                 }
               >
@@ -52,7 +52,7 @@ export function QueuePanel() {
                   <>
                     <div className="flex-1 min-w-0 text-sm truncate">{item.name}</div>
                     {subtitle && (
-                      <span className="text-xs text-neutral-500 truncate text-right max-w-[50%]">
+                      <span className="text-xs text-neutral-600 dark:text-neutral-500 truncate text-right max-w-[50%]">
                         {subtitle}
                       </span>
                     )}
@@ -60,7 +60,7 @@ export function QueuePanel() {
                 ) : (
                   <>
                     <div className="text-sm truncate">{item.name}</div>
-                    <div className="text-xs text-neutral-500 truncate">{subtitle}</div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-500 truncate">{subtitle}</div>
                   </>
                 )}
               </li>

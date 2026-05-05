@@ -123,14 +123,14 @@ export function SelectedPlaylist({
   const playlistSection = (
     <section className="flex flex-col overflow-hidden min-h-0" style={{ flex: 1 }}>
       {!kind ? (
-        <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm px-6 text-center">
+        <div className="flex-1 flex items-center justify-center text-neutral-600 dark:text-neutral-500 text-sm px-6 text-center">
           Select Liked Songs, Recently Played, or a playlist / album to view here.
         </div>
       ) : (
         <>
           <div
             className={
-              'px-6 py-4 border-b border-neutral-800 ' +
+              'px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 ' +
               (detailLayout === 'right' ? 'flex items-baseline gap-3' : '')
             }
           >
@@ -144,7 +144,7 @@ export function SelectedPlaylist({
             </h2>
             <p
               className={
-                'text-xs text-neutral-500 truncate ' +
+                'text-xs text-neutral-600 dark:text-neutral-500 truncate ' +
                 (detailLayout === 'right' ? 'text-right' : '')
               }
             >
@@ -167,9 +167,9 @@ export function SelectedPlaylist({
               })()}
             </p>
           </div>
-          {error && <p className="px-6 py-4 text-sm text-red-400">{error}</p>}
+          {error && <p className="px-6 py-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
           {!loading && !error && filteredTracks.length === 0 && (
-            <p className="px-6 py-4 text-sm text-neutral-500">
+            <p className="px-6 py-4 text-sm text-neutral-600 dark:text-neutral-500">
               {kind === 'playlist' && !canEditSelection && tracks.length === 0
                 ? 'Externally owned — cannot show tracks due to API limitation.'
                 : hasQuery
@@ -192,27 +192,27 @@ export function SelectedPlaylist({
                     }
                     onDoubleClick={() => void playFromCollection(t.uri)}
                     className={
-                      'px-6 py-2 cursor-pointer flex items-center gap-3 border-b border-neutral-900 ' +
-                      (isFocused ? 'bg-neutral-800' : 'hover:bg-neutral-800/60')
+                      'px-6 py-2 cursor-pointer flex items-center gap-3 border-b border-neutral-100 dark:border-neutral-900 ' +
+                      (isFocused ? 'bg-neutral-200 dark:bg-neutral-800' : 'hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60')
                     }
                   >
-                    <span className="text-neutral-600 text-xs w-6 text-right tabular-nums">
+                    <span className="text-neutral-400 dark:text-neutral-600 text-xs w-6 text-right tabular-nums">
                       {idx + 1}
                     </span>
                     {detailLayout === 'right' ? (
                       <>
                         <div className="flex-1 min-w-0 text-sm truncate">{t.name}</div>
-                        <span className="text-xs text-neutral-400 truncate text-right max-w-[40%]">
+                        <span className="text-xs text-neutral-600 dark:text-neutral-400 truncate text-right max-w-[40%]">
                           {artists}
                         </span>
                       </>
                     ) : (
                       <div className="flex-1 min-w-0">
                         <div className="text-sm truncate">{t.name}</div>
-                        <div className="text-xs text-neutral-400 truncate">{artists}</div>
+                        <div className="text-xs text-neutral-600 dark:text-neutral-400 truncate">{artists}</div>
                       </div>
                     )}
-                    <span className="text-xs text-neutral-500 tabular-nums">
+                    <span className="text-xs text-neutral-600 dark:text-neutral-500 tabular-nums">
                       {formatDuration(t.duration_ms)}
                     </span>
                   </li>
@@ -241,7 +241,7 @@ export function SelectedPlaylist({
       className={
         'p-3 flex-shrink-0 ' +
         (searchPosition === 'above' ? 'border-b' : 'border-t') +
-        ' border-neutral-800'
+        ' border-neutral-200 dark:border-neutral-800'
       }
     >
       <input
@@ -257,7 +257,7 @@ export function SelectedPlaylist({
             else inputRef.current?.blur()
           }
         }}
-        className="w-full px-3 py-2 rounded bg-neutral-800 border border-neutral-700 text-sm focus:outline-none focus:border-neutral-500"
+        className="w-full px-3 py-2 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm focus:outline-none focus:border-neutral-500 dark:focus:border-neutral-500"
       />
     </div>
   )
@@ -267,11 +267,11 @@ export function SelectedPlaylist({
       className={
         'flex flex-col overflow-hidden min-h-0 ' +
         (searchPosition === 'above' ? 'border-b' : 'border-t') +
-        ' border-neutral-800'
+        ' border-neutral-200 dark:border-neutral-800'
       }
       style={{ flex: 1 }}
     >
-      <div className="flex flex-wrap flex-shrink-0 border-b border-neutral-800">
+      <div className="flex flex-wrap flex-shrink-0 border-b border-neutral-200 dark:border-neutral-800">
         {(['tracks', 'albums', 'artists', 'playlists'] as Tab[]).map((t) => {
           const active = tab === t
           const c = counts[t]
@@ -280,13 +280,13 @@ export function SelectedPlaylist({
               key={t}
               onClick={() => setTab(t)}
               className={
-                'flex-1 min-w-[25%] px-4 py-1.5 text-[10px] uppercase tracking-wider text-center hover:bg-neutral-800 border-r border-neutral-800 last:border-r-0 ' +
-                (active ? 'text-[var(--color-accent)]' : 'text-neutral-500')
+                'flex-1 min-w-[25%] px-4 py-1.5 text-[10px] uppercase tracking-wider text-center hover:bg-neutral-200 dark:hover:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-800 last:border-r-0 ' +
+                (active ? 'text-[var(--color-accent)]' : 'text-neutral-600 dark:text-neutral-500')
               }
             >
               {t}
               {c > 0 && (
-                <span className="ml-1 text-neutral-600 normal-case tracking-normal">
+                <span className="ml-1 text-neutral-400 dark:text-neutral-600 normal-case tracking-normal">
                   ({c})
                 </span>
               )}
@@ -296,10 +296,10 @@ export function SelectedPlaylist({
       </div>
       <div className="overflow-auto flex-1 min-h-0">
         {searchError && (
-          <p className="px-4 py-2 text-sm text-red-400">{searchError}</p>
+          <p className="px-4 py-2 text-sm text-red-600 dark:text-red-400">{searchError}</p>
         )}
         {searchLoading && (
-          <p className="px-4 py-2 text-sm text-neutral-500">Searching…</p>
+          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">Searching…</p>
         )}
         {!searchLoading && !searchError && (
           <>
@@ -431,7 +431,7 @@ function ResultList<T>({
   const loadingMore = useSearch((s) => s.loadingMore[tabKey])
   const loadMore = useSearch((s) => s.loadMore)
   if (items.length === 0) {
-    return <p className="px-4 py-2 text-sm text-neutral-500">No results.</p>
+    return <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">No results.</p>
   }
   return (
     <>
@@ -454,8 +454,8 @@ function ResultList<T>({
             }}
             onDoubleClick={r.onPlay}
             className={
-              'px-4 py-2 cursor-pointer border-b border-neutral-900 ' +
-              (isFocused ? 'bg-neutral-800' : 'hover:bg-neutral-800/60') +
+              'px-4 py-2 cursor-pointer border-b border-neutral-100 dark:border-neutral-900 ' +
+              (isFocused ? 'bg-neutral-200 dark:bg-neutral-800' : 'hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60') +
               (detailLayout === 'right' ? ' flex items-center gap-3' : '')
             }
           >
@@ -463,12 +463,12 @@ function ResultList<T>({
               <>
                 <div className="flex-1 min-w-0 text-sm truncate">{r.title}</div>
                 {r.subtitle && (
-                  <span className="text-xs text-neutral-500 truncate text-right max-w-[50%]">
+                  <span className="text-xs text-neutral-600 dark:text-neutral-500 truncate text-right max-w-[50%]">
                     {r.subtitle}
                   </span>
                 )}
                 {r.durationMs != null && (
-                  <span className="text-xs text-neutral-500 tabular-nums">
+                  <span className="text-xs text-neutral-600 dark:text-neutral-500 tabular-nums">
                     {formatDuration(r.durationMs)}
                   </span>
                 )}
@@ -477,7 +477,7 @@ function ResultList<T>({
               <>
                 <div className="text-sm truncate">{r.title}</div>
                 {r.subtitle && (
-                  <div className="text-xs text-neutral-500 truncate">{r.subtitle}</div>
+                  <div className="text-xs text-neutral-600 dark:text-neutral-500 truncate">{r.subtitle}</div>
                 )}
               </>
             )}

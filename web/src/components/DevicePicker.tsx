@@ -86,14 +86,14 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
       onClick={close}
     >
       <div
-        className="bg-neutral-900 rounded-lg p-4 w-96 max-w-[90vw] shadow-xl border border-neutral-800"
+        className="bg-white dark:bg-neutral-900 rounded-lg p-4 w-96 max-w-[90vw] shadow-xl border border-neutral-200 dark:border-neutral-800"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-3">Select playback device</h2>
-        {error && <p className="text-red-400 text-sm mb-2">{error}</p>}
-        {loading && <p className="text-neutral-400 text-sm">Loading…</p>}
+        {error && <p className="text-red-600 dark:text-red-400 text-sm mb-2">{error}</p>}
+        {loading && <p className="text-neutral-600 dark:text-neutral-400 text-sm">Loading…</p>}
         {!loading && devices.length === 0 && !error && (
-          <p className="text-neutral-400 text-sm">
+          <p className="text-neutral-600 dark:text-neutral-400 text-sm">
             No devices found. Open Spotify on your phone, desktop app, or a speaker first.
           </p>
         )}
@@ -104,7 +104,9 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
                 key={d.id ?? d.name}
                 className={
                   'px-3 py-2 rounded cursor-pointer ' +
-                  (i === selectedIdx ? 'bg-neutral-700' : 'hover:bg-neutral-800')
+                  (i === selectedIdx
+                    ? 'bg-neutral-200 dark:bg-neutral-700'
+                    : 'hover:bg-neutral-100 dark:hover:bg-neutral-800')
                 }
                 onMouseEnter={() => setSelectedIdx(i)}
                 onClick={() => void rowClick(i)}
@@ -112,20 +114,20 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
                 <div className="flex items-center justify-between">
                   <span>
                     {d.name}{' '}
-                    <span className="text-neutral-500 text-xs">({d.type})</span>
+                    <span className="text-neutral-600 dark:text-neutral-500 text-xs">({d.type})</span>
                   </span>
                   {d.is_active && (
                     <span className="text-[var(--color-accent)] text-xs">active</span>
                   )}
                   {d.is_restricted && (
-                    <span className="text-yellow-500 text-xs ml-2">restricted</span>
+                    <span className="text-yellow-700 dark:text-yellow-500 text-xs ml-2">restricted</span>
                   )}
                 </div>
               </li>
             ))}
           </ul>
         )}
-        <p className="text-neutral-500 text-xs mt-3">
+        <p className="text-neutral-600 dark:text-neutral-500 text-xs mt-3">
           j/k or ↓/↑ to navigate · Enter to switch · Esc to close
         </p>
       </div>

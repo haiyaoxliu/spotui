@@ -95,12 +95,12 @@ export function ProgressBar({ onAfterAction }: { onAfterAction: Refresh }) {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         className={
-          'flex-1 h-1.5 bg-neutral-800 rounded-full ' +
+          'flex-1 h-1.5 bg-neutral-200 dark:bg-neutral-800 rounded-full ' +
           (duration != null ? 'cursor-pointer hover:h-2 transition-[height]' : 'opacity-50')
         }
       >
         <div
-          className="h-full bg-neutral-300 rounded-full"
+          className="h-full bg-neutral-700 dark:bg-neutral-300 rounded-full"
           style={{ width: `${ratio * 100}%` }}
         />
       </div>

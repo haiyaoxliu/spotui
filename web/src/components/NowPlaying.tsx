@@ -58,9 +58,9 @@ export function NowPlaying() {
 
   if (!playback) {
     return (
-      <div className="p-4 border-b border-neutral-800 text-sm text-neutral-500">
+      <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 text-sm text-neutral-500">
         No active device. Press{' '}
-        <kbd className="px-1.5 py-0.5 mx-0.5 rounded bg-neutral-800 border border-neutral-700 text-xs">
+        <kbd className="px-1.5 py-0.5 mx-0.5 rounded bg-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs">
           d
         </kbd>{' '}
         to pick one.
@@ -70,7 +70,7 @@ export function NowPlaying() {
 
   if (!playback.item) {
     return (
-      <div className="p-4 border-b border-neutral-800 text-sm text-neutral-500">
+      <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 text-sm text-neutral-500">
         Nothing playing.
       </div>
     )
@@ -87,7 +87,7 @@ export function NowPlaying() {
   const heart = liked === null ? '·' : liked ? '♥' : '♡'
 
   return (
-    <div className="p-4 flex gap-3 border-b border-neutral-800">
+    <div className="p-4 flex gap-3 border-b border-neutral-200 dark:border-neutral-800">
       {albumImage ? (
         <img
           src={albumImage}
@@ -95,7 +95,7 @@ export function NowPlaying() {
           className="w-16 h-16 rounded object-cover flex-shrink-0"
         />
       ) : (
-        <div className="w-16 h-16 rounded bg-neutral-800 flex-shrink-0" />
+        <div className="w-16 h-16 rounded bg-neutral-200 dark:bg-neutral-800 flex-shrink-0" />
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -106,7 +106,7 @@ export function NowPlaying() {
               disabled={liked === null}
               className={
                 'text-base leading-none disabled:opacity-40 ' +
-                (liked ? 'text-[var(--color-accent)]' : 'text-neutral-500 hover:text-neutral-300')
+                (liked ? 'text-[var(--color-accent)]' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300')
               }
               title={
                 liked === null
@@ -120,10 +120,10 @@ export function NowPlaying() {
             </button>
           )}
         </div>
-        <div className="text-xs text-neutral-400 truncate">{subtitle}</div>
+        <div className="text-xs text-neutral-600 dark:text-neutral-400 truncate">{subtitle}</div>
         {source && (
           <div className="text-[10px] text-neutral-500 truncate mt-0.5">
-            from <span className="text-neutral-400">{source}</span>
+            from <span className="text-neutral-700 dark:text-neutral-400">{source}</span>
           </div>
         )}
         <div className="text-[10px] text-neutral-500 truncate mt-0.5">

@@ -76,13 +76,13 @@ export function App() {
     }
   }, [])
 
-  if (loading) return <div className="p-8 text-neutral-400">Loading…</div>
+  if (loading) return <div className="p-8 text-neutral-500 dark:text-neutral-400">Loading…</div>
 
   if (error) {
     return (
       <div className="p-8 max-w-xl space-y-3">
-        <h1 className="text-xl font-semibold text-red-400">Error</h1>
-        <pre className="whitespace-pre-wrap text-sm text-neutral-300">{error}</pre>
+        <h1 className="text-xl font-semibold text-red-600 dark:text-red-400">Error</h1>
+        <pre className="whitespace-pre-wrap text-sm text-neutral-700 dark:text-neutral-300">{error}</pre>
         <button
           onClick={() => {
             logout()
@@ -90,7 +90,7 @@ export function App() {
             sessionStorage.removeItem('pkce_state')
             window.location.replace('/')
           }}
-          className="px-3 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-sm"
+          className="px-3 py-1.5 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-sm"
         >
           Reset
         </button>
@@ -102,7 +102,7 @@ export function App() {
     return (
       <div className="p-8 space-y-4">
         <h1 className="text-2xl font-semibold">Spotify Controller</h1>
-        <p className="text-neutral-400 text-sm max-w-md">
+        <p className="text-neutral-600 dark:text-neutral-400 text-sm max-w-md">
           Local web controller for the Spotify Web API. Drives whichever Spotify Connect device is
           active (phone, desktop app, speaker).
         </p>
@@ -138,6 +138,8 @@ function Player({ me }: { me: Me }) {
   const setTransportPosition = useUI((s) => s.setTransportPosition)
   const setSearchPosition = useUI((s) => s.setSearchPosition)
   const setDetailLayout = useUI((s) => s.setDetailLayout)
+  const theme = useUI((s) => s.theme)
+  const toggleTheme = useUI((s) => s.toggleTheme)
 
   const refresh = useCallback(async () => {
     const [stateRes, queueRes] = await Promise.allSettled([getPlaybackState(), getQueue()])
@@ -308,12 +310,12 @@ function Player({ me }: { me: Me }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="px-4 py-2 border-b border-neutral-800 flex items-center justify-between text-sm">
+      <header className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-sm">
         <span>
           <span className="text-neutral-500">Logged in as </span>
           <span className="font-medium">{me.display_name}</span>
           {me.product !== 'premium' && (
-            <span className="ml-2 text-yellow-400">(non-premium — controls will fail)</span>
+            <span className="ml-2 text-yellow-700 dark:text-yellow-400">(non-premium — controls will fail)</span>
           )}
         </span>
         <div className="flex items-center gap-2">
@@ -321,14 +323,14 @@ function Player({ me }: { me: Me }) {
             onClick={() =>
               setSearchPosition(searchPosition === 'below' ? 'above' : 'below')
             }
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
             title="Toggle search bar position"
           >
             search: {searchPosition}
           </button>
           <button
             onClick={() => setDetailLayout(detailLayout === 'below' ? 'right' : 'below')}
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
             title="Toggle row detail layout"
           >
             details: {detailLayout}
@@ -337,28 +339,35 @@ function Player({ me }: { me: Me }) {
             onClick={() =>
               setTransportPosition(transportPosition === 'bottom' ? 'right' : 'bottom')
             }
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
             title="Toggle transport bar position"
           >
             controls: {transportPosition}
           </button>
           <button
             onClick={openDevicePicker}
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
             title="Pick device (d)"
           >
             Device (d)
           </button>
           <button
+            onClick={toggleTheme}
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            theme: {theme}
+          </button>
+          <button
             onClick={openColorPicker}
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
             title="Customize colors (c)"
           >
             Colors (c)
           </button>
           <button
             onClick={openHelp}
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
             title="Show keybinds (?)"
           >
             ?
@@ -368,7 +377,7 @@ function Player({ me }: { me: Me }) {
               logout()
               window.location.reload()
             }}
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
           >
             Log out
           </button>

@@ -124,8 +124,7 @@ export function SelectedPlaylist({
     <section className="flex flex-col overflow-hidden min-h-0" style={{ flex: 1 }}>
       {!kind ? (
         <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm px-6 text-center">
-          Select a playlist, Liked Songs, or Recently Played from the left —
-          or load a playlist or album from search results.
+          Select Liked Songs, Recently Played, or a playlist / album to view here.
         </div>
       ) : (
         <>
@@ -152,12 +151,15 @@ export function SelectedPlaylist({
               {(() => {
                 if (loading) return 'loading…'
                 const count = trackCount ?? tracks.length
+                const partial = trackCount != null && tracks.length < trackCount
                 const parts: string[] = []
                 if (owner) parts.push(`by ${owner}`)
                 parts.push(
                   hasQuery
                     ? `${filteredTracks.length} of ${count} match`
-                    : `${count} track${count === 1 ? '' : 's'}`,
+                    : partial
+                      ? `${tracks.length} of ${count} tracks loaded`
+                      : `${count} track${count === 1 ? '' : 's'}`,
                 )
                 if (totalDurationMs != null) parts.push(formatDurationLong(totalDurationMs))
                 if (minAddedAt) parts.push(`since ${minAddedAt.slice(0, 7)}`)

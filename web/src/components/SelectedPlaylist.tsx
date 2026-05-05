@@ -170,10 +170,10 @@ export function SelectedPlaylist({
           {error && <p className="px-6 py-4 text-sm text-red-400">{error}</p>}
           {!loading && !error && filteredTracks.length === 0 && (
             <p className="px-6 py-4 text-sm text-neutral-500">
-              {hasQuery
-                ? 'No tracks match.'
-                : kind === 'playlist' && !canEditSelection && tracks.length === 0
-                  ? 'Externally owned — cannot show tracks due to API limitation.'
+              {kind === 'playlist' && !canEditSelection && tracks.length === 0
+                ? 'Externally owned — cannot show tracks due to API limitation.'
+                : hasQuery
+                  ? 'No tracks match.'
                   : 'No tracks.'}
             </p>
           )}

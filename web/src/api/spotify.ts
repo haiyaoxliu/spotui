@@ -313,3 +313,19 @@ export async function checkLibraryContains(uris: string[]): Promise<boolean[]> {
   const res = await api<boolean[]>(`/me/library/contains?${params.toString()}`)
   return res ?? []
 }
+
+// ---------- Playlist mutation ----------
+
+// Spec line 1232 (operationId: add-items-to-playlist) — the canonical add
+// endpoint. The legacy POST /playlists/{id}/tracks (line 998) is deprecated.
+// Max 100 URIs per call.
+export async function addItemsToPlaylist(
+  playlistId: string,
+  uris: string[],
+): Promise<void> {
+  if (uris.length === 0) return
+  const params = new URLSearchParams({ uris: uris.join(',') })
+  await api(`/playlists/${playlistId}/items?${params.toString()}`, {
+    method: 'POST',
+  })
+}

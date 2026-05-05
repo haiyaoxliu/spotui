@@ -1,5 +1,7 @@
 import {
+  addItemsToPlaylist,
   addToQueue,
+  checkLibraryContains,
   next,
   pause,
   play,
@@ -199,7 +201,47 @@ export async function playFocused(refresh: Refresh): Promise<void> {
   setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
 }
 
+// Play the focused track stand-alone, ignoring the open playlist's context.
+// TUI parity for `Q` (vs Enter, which keeps context). Track rows only.
+export async function playFocusedTrackOnly(refresh: Refresh): Promise<void> {
+  const f = useUI.getState().focusedRow
+  if (!f || !f.isTrack) return
+  try {
+    await play({ uris: [f.uri] })
+  } catch (e) {
+    console.error('play focused (track-only) failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+// Add the focused track to the currently-open playlist. Only valid when the
+// open selection is a playlist (not Liked Songs / Recently Played) and the
+// focused row is a track. The Library panel already filters its list to
+// owned/collab playlists, so any contextId from selection is editable.
+export async function addFocusedToOpenPlaylist(): Promise<void> {
+  const f = useUI.getState().focusedRow
+  if (!f || !f.isTrack) return
+  const sel = useSelection.getState()
+  if (sel.kind !== 'playlist' || !sel.contextId) return
+  try {
+    await addItemsToPlaylist(sel.contextId, [f.uri])
+  } catch (e) {
+    console.error('add focused to playlist failed:', e)
+  }
+}
+
+// Toggle Liked Songs on the focused track if one is focused; otherwise on
+// the playing track (TUI parity for `l`). When the targeted track happens to
+// also be the playing track, the playing-track liked indicator updates
+// optimistically; otherwise we just fire the API call.
 export async function toggleLikeCurrent(): Promise<void> {
+  const focused = useUI.getState().focusedRow
+  if (focused && focused.isTrack) {
+    await toggleLikeFocused(focused.uri)
+    return
+  }
   const playback = usePlayer.getState().playback
   const item = playback?.item
   if (!item || item.type !== 'track') return
@@ -216,5 +258,29 @@ export async function toggleLikeCurrent(): Promise<void> {
   } catch (e) {
     usePlayer.getState().setLiked(wasLiked)
     console.error('toggle like failed:', e)
+  }
+}
+
+async function toggleLikeFocused(uri: string): Promise<void> {
+  // We don't track liked state for arbitrary tracks (only the playing one),
+  // so probe /me/library/contains first to know which direction to flip.
+  let isLiked: boolean
+  try {
+    const [contains] = await checkLibraryContains([uri])
+    isLiked = !!contains
+  } catch (e) {
+    console.error('like-state probe failed:', e)
+    return
+  }
+  // If the focused track is also the playing track, flip the indicator.
+  const playingUri = usePlayer.getState().playback?.item?.uri
+  const willLike = !isLiked
+  if (playingUri === uri) usePlayer.getState().setLiked(willLike)
+  try {
+    if (isLiked) await removeFromLibrary([uri])
+    else await saveToLibrary([uri])
+  } catch (e) {
+    if (playingUri === uri) usePlayer.getState().setLiked(isLiked)
+    console.error('toggle like (focused) failed:', e)
   }
 }

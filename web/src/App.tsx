@@ -5,6 +5,7 @@ import { checkLibraryContains, getPlaybackState, getQueue } from './api/spotify'
 import { usePlayer } from './store/player'
 import { useUI } from './store/ui'
 import {
+  addFocusedToOpenPlaylist,
   adjustSeek,
   adjustVolume,
   cycleRepeat,
@@ -14,6 +15,7 @@ import {
   isShuffleSuppressed,
   isVolumeSuppressed,
   playFocused,
+  playFocusedTrackOnly,
   queueFocused,
   skipNext,
   skipPrevious,
@@ -241,6 +243,14 @@ function Player({ me }: { me: Me }) {
         case 'q':
           e.preventDefault()
           void queueFocused()
+          break
+        case 'Q':
+          e.preventDefault()
+          void playFocusedTrackOnly(refresh)
+          break
+        case 'a':
+          e.preventDefault()
+          void addFocusedToOpenPlaylist()
           break
         case 'Enter':
           e.preventDefault()

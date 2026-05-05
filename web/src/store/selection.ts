@@ -41,7 +41,7 @@ interface SelectionState {
   lastPlaylist: Playlist | null
   lastAlbum: SimplifiedAlbum | null
   prior: PriorSelection | null
-  selectPlaylist: (p: Playlist, canEdit: boolean) => Promise<void>
+  selectPlaylist: (p: Playlist, canEdit: boolean, fromSearch?: boolean) => Promise<void>
   selectAlbum: (a: SimplifiedAlbum) => Promise<void>
   selectLiked: () => Promise<void>
   selectRecent: () => Promise<void>
@@ -88,7 +88,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     lastAlbum: null,
     prior: null,
 
-    selectPlaylist: async (p, canEdit) => {
+    selectPlaylist: async (p, canEdit, fromSearch = false) => {
       const prior = maybeCaptureprior()
       set({
         kind: 'playlist',
@@ -107,11 +107,17 @@ export const useSelection = create<SelectionState>((set, get) => {
         lastAlbum: null,
         prior,
       })
+      // Read-only playlists picked from SEARCH results are usually
+      // public/editorial picks the user doesn't follow — Spotify dev-mode
+      // 403s those even through the GET /playlists/{id} fallback. Skip the
+      // fetch and let the pane show the "API limitation" message. Library-
+      // sourced read-only picks (followed playlists, Discover Weekly when
+      // pinned) come through the fallback fine, so we still try those.
+      if (!canEdit && fromSearch) {
+        set({ loading: false })
+        return
+      }
       try {
-        // /items 403s on non-owned/collab playlists; for those (e.g.
-        // Discover Weekly) fall back to GET /playlists/{id}, which embeds
-        // the first page of items and is unrestricted (spec line 848 vs
-        // 1193).
         const items = canEdit
           ? await getPlaylistItems(p.id)
           : await getPlaylistItemsViaFull(p.id)

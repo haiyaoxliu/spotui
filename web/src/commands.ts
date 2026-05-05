@@ -207,7 +207,9 @@ export async function playFocused(refresh: Refresh): Promise<void> {
       .results.playlists?.items.find((p) => p?.uri === f.uri)
     if (pl) {
       const canEdit = !!ui.userId && (pl.owner.id === ui.userId || pl.collaborative)
-      await sel.selectPlaylist(pl, canEdit)
+      // fromSearch=true so read-only picks skip the (often 403'd) items
+      // fetch and surface the API-limitation message instead.
+      await sel.selectPlaylist(pl, canEdit, true)
     }
     return
   }

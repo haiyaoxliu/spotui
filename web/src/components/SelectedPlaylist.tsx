@@ -344,6 +344,7 @@ export function SelectedPlaylist({
                     void selectPlaylist(
                       p,
                       p.owner.id === ownerId || p.collaborative,
+                      true,
                     ),
                 })}
               />

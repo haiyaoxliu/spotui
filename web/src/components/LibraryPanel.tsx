@@ -79,17 +79,14 @@ export function LibraryPanel({
     return (
       <li className={liClass(active)}>
         <button
+          // Single-click selects the playlist and loads it into the pane;
+          // double-click starts playback in the playlist's context.
           onClick={() => void selectPlaylist(pl, editable)}
-          // Non-owned playlists have no track list to interact with, so
-          // dblclick starts playback of the context. Owned playlists' main
-          // affordance is the track list, so we leave dblclick alone.
-          onDoubleClick={
-            editable ? undefined : () => void playContext(pl.uri, onAfterAction)
-          }
+          onDoubleClick={() => void playContext(pl.uri, onAfterAction)}
           className={titleClass(active, !editable)}
           title={
             editable
-              ? pl.name
+              ? `${pl.name} — double-click to play`
               : `${pl.name} (read-only — double-click to play)`
           }
         >

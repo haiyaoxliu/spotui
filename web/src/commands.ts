@@ -14,7 +14,6 @@ import {
   setVolume,
 } from './api/spotify'
 import { usePlayer } from './store/player'
-import { useSearch } from './store/search'
 import { useSelection } from './store/selection'
 import { useUI } from './store/ui'
 
@@ -199,30 +198,11 @@ export async function playFocused(refresh: Refresh): Promise<void> {
   const f = useUI.getState().focusedRow
   if (!f) return
 
-  if (f.pane === 'search' && f.searchType === 'playlist') {
-    const sel = useSelection.getState()
-    const ui = useUI.getState()
-    const pl = useSearch
-      .getState()
-      .results.playlists?.items.find((p) => p?.uri === f.uri)
-    if (pl) {
-      const canEdit = !!ui.userId && (pl.owner.id === ui.userId || pl.collaborative)
-      // Non-owned playlists have no track list to render, so Enter starts
-      // playing the context instead of loading-into-pane. Owned playlists
-      // still load so the user can pick a specific track.
-      if (canEdit) {
-        await sel.selectPlaylist(pl, canEdit, true)
-      } else {
-        await playContext(pl.uri, refresh)
-      }
-    }
-    return
-  }
-  if (f.pane === 'search' && f.searchType === 'album') {
-    const album = useSearch
-      .getState()
-      .results.albums?.items.find((a) => a.uri === f.uri)
-    if (album) await useSelection.getState().selectAlbum(album)
+  // Enter on a focused playlist or album result starts playback in that
+  // context (single-click already loaded it into the pane). Track results
+  // play standalone; artists fall through to the generic context play below.
+  if (f.pane === 'search' && (f.searchType === 'playlist' || f.searchType === 'album')) {
+    await playContext(f.uri, refresh)
     return
   }
 

@@ -328,10 +328,11 @@ export function SelectedPlaylist({
                   isTrack: false,
                   title: a.name,
                   subtitle: a.artists.map((x) => x.name).join(', '),
-                  // Double-click loads the album into the playlist pane
-                  // (browse first), matching what Enter does on the focused
-                  // row. To play the album immediately, pick a track.
-                  onPlay: () => void selectAlbum(a),
+                  // Single-click loads tracks into the pane; double-click
+                  // (or Enter on focused) starts playback in the album
+                  // context.
+                  onSelect: () => void selectAlbum(a),
+                  onPlay: () => void playContext(a.uri, onAfterPlay),
                 })}
               />
             )}
@@ -361,13 +362,12 @@ export function SelectedPlaylist({
                     isTrack: false,
                     title: p.name,
                     subtitle: p.owner.display_name ?? '',
-                    // Owned/collab → load into pane (track list works).
-                    // Non-owned → start playback in the playlist's context,
-                    // since we have no track list to drive a per-track play.
-                    onPlay: () =>
-                      canEdit
-                        ? void selectPlaylist(p, true, true)
-                        : void playContext(p.uri, onAfterPlay),
+                    // Single-click loads into the pane (tracks for owned;
+                    // an "API limitation" message for read-only). Double-
+                    // click (or Enter) starts playback in the playlist's
+                    // context regardless of ownership.
+                    onSelect: () => void selectPlaylist(p, canEdit, true),
+                    onPlay: () => void playContext(p.uri, onAfterPlay),
                   }
                 }}
               />
@@ -414,6 +414,11 @@ function ResultList<T>({
     title: string
     subtitle: string
     durationMs?: number
+    // Fired on single-click after focus is set. Used by playlist / album
+    // tabs to load the row into the pane on click; tracks and artists leave
+    // this undefined since there's nothing to "load".
+    onSelect?: () => void
+    // Fired on double-click and on Enter when the row is focused.
     onPlay: () => void
   }
 }) {
@@ -438,14 +443,15 @@ function ResultList<T>({
         return (
           <li
             key={r.key}
-            onClick={() =>
+            onClick={() => {
               setFocusedRow({
                 pane: 'search',
                 uri: r.uri,
                 isTrack: r.isTrack,
                 searchType,
               })
-            }
+              r.onSelect?.()
+            }}
             onDoubleClick={r.onPlay}
             className={
               'px-4 py-2 cursor-pointer border-b border-neutral-900 ' +

@@ -150,11 +150,38 @@ export async function getMyPlaylists(max = 200): Promise<Playlist[]> {
   return fetchAllPages<Playlist>('/me/playlists?limit=50', max)
 }
 
-// /items is restricted to playlists owned or collaborated on by the current
-// user (spec line 1193). The Library panel filters its list to those, so we
-// never call this with a playlist that would 403.
+// GET /playlists/{id}/items returns 403 for playlists not owned by or
+// collaborated on by the current user (spec line 1193). Use this only for
+// editable selections; non-owned (e.g. pinned Spotify-curated playlists like
+// Discover Weekly) need getPlaylistItemsViaFull below.
 export async function getPlaylistItems(playlistId: string, max = 500): Promise<PlaylistItem[]> {
   return fetchAllPages<PlaylistItem>(`/playlists/${playlistId}/items?limit=100`, max)
+}
+
+// Fallback for non-owned/collab playlists: GET /playlists/{id} (spec line
+// 848) has no ownership restriction and returns a full PlaylistObject with
+// embedded paged items. We pull the first page out of the response, then
+// follow `items.next` for the rest using the same pagination as elsewhere.
+export async function getPlaylistItemsViaFull(
+  playlistId: string,
+  max = 500,
+): Promise<PlaylistItem[]> {
+  const full = await api<{ items?: Page<PlaylistItem> | null }>(
+    `/playlists/${playlistId}`,
+  )
+  const firstPage = full?.items
+  if (!firstPage) return []
+  const all: PlaylistItem[] = [...firstPage.items]
+  let nextPath: string | null = firstPage.next
+    ? firstPage.next.replace('https://api.spotify.com/v1', '')
+    : null
+  while (nextPath && all.length < max) {
+    const page: Page<PlaylistItem> | null = await api<Page<PlaylistItem>>(nextPath)
+    if (!page) break
+    all.push(...page.items)
+    nextPath = page.next ? page.next.replace('https://api.spotify.com/v1', '') : null
+  }
+  return all
 }
 
 export async function getSavedTracks(max = 200): Promise<SavedTrack[]> {

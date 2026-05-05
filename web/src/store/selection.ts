@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import type { Playlist, PlaylistItem, Track } from '../api/spotify'
-import { getPlaylistItems, getRecentlyPlayed, getSavedTracks } from '../api/spotify'
+import {
+  getPlaylistItems,
+  getPlaylistItemsViaFull,
+  getRecentlyPlayed,
+  getSavedTracks,
+} from '../api/spotify'
 
 export type SelectedKind = 'playlist' | 'liked' | 'recent'
 
@@ -16,7 +21,7 @@ interface SelectionState {
   tracks: Track[]
   loading: boolean
   error: string | null
-  selectPlaylist: (p: Playlist) => Promise<void>
+  selectPlaylist: (p: Playlist, canEdit: boolean) => Promise<void>
   selectLiked: () => Promise<void>
   selectRecent: () => Promise<void>
 }
@@ -34,7 +39,7 @@ export const useSelection = create<SelectionState>((set) => ({
   loading: false,
   error: null,
 
-  selectPlaylist: async (p) => {
+  selectPlaylist: async (p, canEdit) => {
     set({
       kind: 'playlist',
       contextUri: p.uri,
@@ -49,7 +54,12 @@ export const useSelection = create<SelectionState>((set) => ({
       error: null,
     })
     try {
-      const items = await getPlaylistItems(p.id)
+      // /items 403s on non-owned/collab playlists; for those (e.g. pinned
+      // Discover Weekly) fall back to GET /playlists/{id}, which embeds the
+      // first page of items and is unrestricted (spec line 848 vs 1193).
+      const items = canEdit
+        ? await getPlaylistItems(p.id)
+        : await getPlaylistItemsViaFull(p.id)
       const tracks = items
         .map((i: PlaylistItem) => i.item ?? i.track ?? null)
         .filter((t): t is Track => !!t && t.type === 'track')

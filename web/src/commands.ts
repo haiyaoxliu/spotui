@@ -152,6 +152,14 @@ export async function adjustSeek(deltaMs: number, refresh: Refresh): Promise<voi
   if (!cur || cur.progress_ms == null) return
   const duration = cur.item?.duration_ms ?? Infinity
   const target = Math.max(0, Math.min(duration, cur.progress_ms + deltaMs))
+  await seekTo(target, refresh)
+}
+
+export async function seekTo(positionMs: number, refresh: Refresh): Promise<void> {
+  const cur = usePlayer.getState().playback
+  if (!cur) return
+  const duration = cur.item?.duration_ms ?? Infinity
+  const target = Math.max(0, Math.min(duration, Math.round(positionMs)))
   usePlayer.getState().patchPlayback({ progress_ms: target })
   suppress.position = Date.now() + 800
   try {

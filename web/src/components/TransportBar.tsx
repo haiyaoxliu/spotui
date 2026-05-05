@@ -8,6 +8,7 @@ import {
   togglePlayPause,
   type Refresh,
 } from '../commands'
+import { ProgressBar } from './ProgressBar'
 
 export function TransportBar({
   onAfterAction,
@@ -108,6 +109,7 @@ export function TransportBar({
           {playButtons}
           {modes}
         </div>
+        <ProgressBar onAfterAction={onAfterAction} />
         {volumeUI}
       </div>
     )
@@ -121,16 +123,21 @@ export function TransportBar({
         : ''
 
   return (
-    <div className="border-t border-neutral-800 bg-neutral-950 px-4 py-3 flex items-center gap-4">
-      {playButtons}
-      {modes}
-      <div className="flex-1 min-w-0">
-        <div className="truncate text-sm">{item?.name ?? '—'}</div>
-        <div className="truncate text-xs text-neutral-400">{subtitle}</div>
+    <div className="border-t border-neutral-800 bg-neutral-950 flex flex-col">
+      <div className="px-4 pt-2">
+        <ProgressBar onAfterAction={onAfterAction} />
       </div>
-      {volumeUI}
-      <div className="text-xs text-neutral-500 truncate max-w-[20%]">
-        {device ? `${device.name} (${device.type})` : 'no active device'}
+      <div className="px-4 py-2 flex items-center gap-4">
+        {playButtons}
+        {modes}
+        <div className="flex-1 min-w-0">
+          <div className="truncate text-sm">{item?.name ?? '—'}</div>
+          <div className="truncate text-xs text-neutral-400">{subtitle}</div>
+        </div>
+        {volumeUI}
+        <div className="text-xs text-neutral-500 truncate max-w-[20%]">
+          {device ? `${device.name} (${device.type})` : 'no active device'}
+        </div>
       </div>
     </div>
   )

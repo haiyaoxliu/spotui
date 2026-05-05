@@ -23,7 +23,7 @@ const GLOBAL: Binding[] = [
 
 const ROW: Binding[] = [
   { keys: 'click', action: 'Focus row (does not play)' },
-  { keys: 'double-click  /  Enter', action: 'Play focused row' },
+  { keys: 'double-click  /  Enter', action: 'Play track, or load focused playlist/album into the pane' },
   { keys: 'q', action: 'Queue focused track' },
   { keys: 'p', action: 'Play focused track stand-alone' },
   { keys: 'a', action: 'Add focused track to open playlist' },
@@ -39,6 +39,10 @@ const DEVICE_PICKER: Binding[] = [
   { keys: 'k  /  ↑', action: 'Move up' },
   { keys: 'Enter', action: 'Switch to highlighted device' },
   { keys: 'Esc', action: 'Close picker' },
+]
+
+const COLOR_PICKER: Binding[] = [
+  { keys: 'Esc  /  c', action: 'Close picker' },
 ]
 
 export function HelpOverlay() {
@@ -76,6 +80,7 @@ export function HelpOverlay() {
         <Section title="Focused row (in playlist or search results)" bindings={ROW} />
         <Section title="Search input" bindings={SEARCH} />
         <Section title="Device picker" bindings={DEVICE_PICKER} />
+        <Section title="Color picker" bindings={COLOR_PICKER} />
       </div>
     </div>
   )

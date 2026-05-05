@@ -124,7 +124,8 @@ export function SelectedPlaylist({
     <section className="flex flex-col overflow-hidden min-h-0" style={{ flex: 1 }}>
       {!kind ? (
         <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm px-6 text-center">
-          Select a playlist, Liked Songs, or Recently Played from the left.
+          Select a playlist, Liked Songs, or Recently Played from the left —
+          or load a playlist or album from search results.
         </div>
       ) : (
         <>
@@ -413,11 +414,17 @@ function ResultList<T>({
   const focusedRow = useUI((s) => s.focusedRow)
   const setFocusedRow = useUI((s) => s.setFocusedRow)
   const detailLayout = useUI((s) => s.detailLayout)
+  // searchType is singular ('track'); SearchResults is keyed plural ('tracks').
+  const tabKey = `${searchType}s` as 'tracks' | 'albums' | 'artists' | 'playlists'
+  const tab = useSearch((s) => s.results[tabKey])
+  const loadingMore = useSearch((s) => s.loadingMore[tabKey])
+  const loadMore = useSearch((s) => s.loadMore)
   if (items.length === 0) {
     return <p className="px-4 py-2 text-sm text-neutral-500">No results.</p>
   }
   return (
-    <ul>
+    <>
+      <ul>
       {items.map((it) => {
         const r = render(it)
         const isFocused =
@@ -465,6 +472,15 @@ function ResultList<T>({
           </li>
         )
       })}
-    </ul>
+      </ul>
+      <LoadMoreFooter
+        loadingMore={loadingMore}
+        hasMore={!!tab?.next}
+        loadedCount={items.length}
+        total={tab?.total ?? null}
+        onLoadMore={() => void loadMore(tabKey)}
+        label={`Load more ${tabKey}`}
+      />
+    </>
   )
 }

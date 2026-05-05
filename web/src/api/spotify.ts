@@ -237,12 +237,14 @@ export interface ArtistObject {
 }
 
 export interface SearchResults {
-  tracks?: { items: Track[]; total: number }
-  albums?: { items: SimplifiedAlbum[]; total: number }
-  artists?: { items: ArtistObject[]; total: number }
+  tracks?: { items: Track[]; total: number; next?: string | null }
+  albums?: { items: SimplifiedAlbum[]; total: number; next?: string | null }
+  artists?: { items: ArtistObject[]; total: number; next?: string | null }
   // Spotify can return null entries here when an item is unavailable.
-  playlists?: { items: (Playlist | null)[]; total: number }
+  playlists?: { items: (Playlist | null)[]; total: number; next?: string | null }
 }
+
+export type SearchTab = 'tracks' | 'albums' | 'artists' | 'playlists'
 
 export async function search(q: string): Promise<SearchResults> {
   const trimmed = q.trim()
@@ -255,6 +257,21 @@ export async function search(q: string): Promise<SearchResults> {
   })
   const res = await api<SearchResults>(`/search?${params.toString()}`)
   return res ?? {}
+}
+
+// Follow a per-type next URL returned by the initial /search call. Returns
+// just the slice for that tab — items + the new next URL + total.
+export async function searchMore<K extends SearchTab>(
+  nextUrl: string,
+): Promise<SearchResults[K] | null> {
+  const path = nextUrl.replace('https://api.spotify.com/v1', '')
+  const res = await api<SearchResults>(path)
+  if (!res) return null
+  // The single-type response only has the requested tab populated.
+  for (const k of ['tracks', 'albums', 'artists', 'playlists'] as SearchTab[]) {
+    if (res[k]) return res[k] as SearchResults[K]
+  }
+  return null
 }
 
 export async function getDevices(): Promise<Device[]> {

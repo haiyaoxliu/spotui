@@ -38,7 +38,7 @@ const DEVICE_PICKER: Binding[] = [
   { keys: 'j  /  ↓', action: 'Move down' },
   { keys: 'k  /  ↑', action: 'Move up' },
   { keys: 'Enter', action: 'Switch to highlighted device' },
-  { keys: 'Esc', action: 'Close picker' },
+  { keys: 'Esc  /  d', action: 'Close picker' },
 ]
 
 const COLOR_PICKER: Binding[] = [

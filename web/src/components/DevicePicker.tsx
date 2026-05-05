@@ -44,7 +44,7 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
 
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' || e.key === 'd') {
         e.preventDefault()
         close()
       } else if (e.key === 'j' || e.key === 'ArrowDown') {
@@ -128,7 +128,7 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
           </ul>
         )}
         <p className="text-neutral-600 dark:text-neutral-500 text-xs mt-3">
-          j/k or ↓/↑ to navigate · Enter to switch · Esc to close
+          j/k or ↓/↑ to navigate · Enter to switch · Esc or d to close
         </p>
       </div>
     </div>

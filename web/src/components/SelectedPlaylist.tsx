@@ -19,6 +19,13 @@ function formatDuration(ms: number): string {
   return `${m}:${String(s % 60).padStart(2, '0')}`
 }
 
+function formatDurationLong(ms: number): string {
+  const secs = Math.floor(ms / 1000)
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  return h > 0 ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`
+}
+
 export function SelectedPlaylist({
   onAfterPlay,
   searchPosition,
@@ -29,6 +36,10 @@ export function SelectedPlaylist({
   const kind = useSelection((s) => s.kind)
   const name = useSelection((s) => s.name)
   const contextUri = useSelection((s) => s.contextUri)
+  const owner = useSelection((s) => s.owner)
+  const trackCount = useSelection((s) => s.trackCount)
+  const totalDurationMs = useSelection((s) => s.totalDurationMs)
+  const minAddedAt = useSelection((s) => s.minAddedAt)
   const tracks = useSelection((s) => s.tracks)
   const loading = useSelection((s) => s.loading)
   const error = useSelection((s) => s.error)
@@ -40,6 +51,9 @@ export function SelectedPlaylist({
   const searchError = useSearch((s) => s.error)
 
   const focusTick = useUI((s) => s.searchFocusTick)
+  const focusedRow = useUI((s) => s.focusedRow)
+  const setFocusedRow = useUI((s) => s.setFocusedRow)
+  const detailLayout = useUI((s) => s.detailLayout)
   const inputRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('tracks')
 
@@ -105,14 +119,40 @@ export function SelectedPlaylist({
         </div>
       ) : (
         <>
-          <div className="px-6 py-4 border-b border-neutral-800">
-            <h2 className="text-lg font-semibold truncate">{name}</h2>
-            <p className="text-xs text-neutral-500">
-              {loading
-                ? 'loading…'
-                : hasQuery
-                  ? `${filteredTracks.length} of ${tracks.length} match`
-                  : `${tracks.length} track${tracks.length === 1 ? '' : 's'}`}
+          <div
+            className={
+              'px-6 py-4 border-b border-neutral-800 ' +
+              (detailLayout === 'right' ? 'flex items-baseline gap-3' : '')
+            }
+          >
+            <h2
+              className={
+                'text-lg font-semibold truncate ' +
+                (detailLayout === 'right' ? 'flex-1 min-w-0' : '')
+              }
+            >
+              {name}
+            </h2>
+            <p
+              className={
+                'text-xs text-neutral-500 truncate ' +
+                (detailLayout === 'right' ? 'text-right' : '')
+              }
+            >
+              {(() => {
+                if (loading) return 'loading…'
+                const count = trackCount ?? tracks.length
+                const parts: string[] = []
+                if (owner) parts.push(`by ${owner}`)
+                parts.push(
+                  hasQuery
+                    ? `${filteredTracks.length} of ${count} match`
+                    : `${count} track${count === 1 ? '' : 's'}`,
+                )
+                if (totalDurationMs != null) parts.push(formatDurationLong(totalDurationMs))
+                if (minAddedAt) parts.push(`since ${minAddedAt.slice(0, 7)}`)
+                return parts.join(' · ')
+              })()}
             </p>
           </div>
           {error && <p className="px-6 py-4 text-sm text-red-400">{error}</p>}
@@ -123,26 +163,44 @@ export function SelectedPlaylist({
           )}
           {filteredTracks.length > 0 && (
             <ul className="overflow-auto flex-1 min-h-0">
-              {filteredTracks.map((t, idx) => (
-                <li
-                  key={`${t.id}-${idx}`}
-                  onClick={() => void playFromCollection(t.uri)}
-                  className="px-6 py-2 hover:bg-neutral-800 cursor-pointer flex items-center gap-3 border-b border-neutral-900"
-                >
-                  <span className="text-neutral-600 text-xs w-6 text-right tabular-nums">
-                    {idx + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm truncate">{t.name}</div>
-                    <div className="text-xs text-neutral-400 truncate">
-                      {t.artists.map((a) => a.name).join(', ')}
-                    </div>
-                  </div>
-                  <span className="text-xs text-neutral-500 tabular-nums">
-                    {formatDuration(t.duration_ms)}
-                  </span>
-                </li>
-              ))}
+              {filteredTracks.map((t, idx) => {
+                const artists = t.artists.map((a) => a.name).join(', ')
+                const isFocused =
+                  focusedRow?.pane === 'playlist' && focusedRow.uri === t.uri
+                return (
+                  <li
+                    key={`${t.id}-${idx}`}
+                    onClick={() =>
+                      setFocusedRow({ pane: 'playlist', uri: t.uri, isTrack: true })
+                    }
+                    onDoubleClick={() => void playFromCollection(t.uri)}
+                    className={
+                      'px-6 py-2 cursor-pointer flex items-center gap-3 border-b border-neutral-900 ' +
+                      (isFocused ? 'bg-neutral-800' : 'hover:bg-neutral-800/60')
+                    }
+                  >
+                    <span className="text-neutral-600 text-xs w-6 text-right tabular-nums">
+                      {idx + 1}
+                    </span>
+                    {detailLayout === 'right' ? (
+                      <>
+                        <div className="flex-1 min-w-0 text-sm truncate">{t.name}</div>
+                        <span className="text-xs text-neutral-400 truncate text-right max-w-[40%]">
+                          {artists}
+                        </span>
+                      </>
+                    ) : (
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm truncate">{t.name}</div>
+                        <div className="text-xs text-neutral-400 truncate">{artists}</div>
+                      </div>
+                    )}
+                    <span className="text-xs text-neutral-500 tabular-nums">
+                      {formatDuration(t.duration_ms)}
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </>
@@ -222,9 +280,12 @@ export function SelectedPlaylist({
                 items={sTracks}
                 render={(t: Track) => ({
                   key: t.id,
+                  uri: t.uri,
+                  isTrack: true,
                   title: t.name,
                   subtitle: t.artists.map((a) => a.name).join(', '),
-                  onClick: () => void playFromSearch(t.uri, 'track'),
+                  durationMs: t.duration_ms,
+                  onPlay: () => void playFromSearch(t.uri, 'track'),
                 })}
               />
             )}
@@ -233,9 +294,11 @@ export function SelectedPlaylist({
                 items={sAlbums}
                 render={(a: SimplifiedAlbum) => ({
                   key: a.id,
+                  uri: a.uri,
+                  isTrack: false,
                   title: a.name,
                   subtitle: a.artists.map((x) => x.name).join(', '),
-                  onClick: () => void playFromSearch(a.uri, 'context'),
+                  onPlay: () => void playFromSearch(a.uri, 'context'),
                 })}
               />
             )}
@@ -244,9 +307,11 @@ export function SelectedPlaylist({
                 items={sArtists}
                 render={(a: ArtistObject) => ({
                   key: a.id,
+                  uri: a.uri,
+                  isTrack: false,
                   title: a.name,
                   subtitle: 'artist',
-                  onClick: () => void playFromSearch(a.uri, 'context'),
+                  onPlay: () => void playFromSearch(a.uri, 'context'),
                 })}
               />
             )}
@@ -255,9 +320,11 @@ export function SelectedPlaylist({
                 items={sPlaylists}
                 render={(p: Playlist) => ({
                   key: p.id,
+                  uri: p.uri,
+                  isTrack: false,
                   title: p.name,
                   subtitle: p.owner.display_name ?? '',
-                  onClick: () => void playFromSearch(p.uri, 'context'),
+                  onPlay: () => void playFromSearch(p.uri, 'context'),
                 })}
               />
             )}
@@ -293,11 +360,17 @@ function ResultList<T>({
   items: T[]
   render: (item: T) => {
     key: string
+    uri: string
+    isTrack: boolean
     title: string
     subtitle: string
-    onClick: () => void
+    durationMs?: number
+    onPlay: () => void
   }
 }) {
+  const focusedRow = useUI((s) => s.focusedRow)
+  const setFocusedRow = useUI((s) => s.setFocusedRow)
+  const detailLayout = useUI((s) => s.detailLayout)
   if (items.length === 0) {
     return <p className="px-4 py-2 text-sm text-neutral-500">No results.</p>
   }
@@ -305,15 +378,42 @@ function ResultList<T>({
     <ul>
       {items.map((it) => {
         const r = render(it)
+        const isFocused =
+          focusedRow?.pane === 'search' && focusedRow.uri === r.uri
         return (
           <li
             key={r.key}
-            onClick={r.onClick}
-            className="px-4 py-2 hover:bg-neutral-800 cursor-pointer border-b border-neutral-900"
+            onClick={() =>
+              setFocusedRow({ pane: 'search', uri: r.uri, isTrack: r.isTrack })
+            }
+            onDoubleClick={r.onPlay}
+            className={
+              'px-4 py-2 cursor-pointer border-b border-neutral-900 ' +
+              (isFocused ? 'bg-neutral-800' : 'hover:bg-neutral-800/60') +
+              (detailLayout === 'right' ? ' flex items-center gap-3' : '')
+            }
           >
-            <div className="text-sm truncate">{r.title}</div>
-            {r.subtitle && (
-              <div className="text-xs text-neutral-500 truncate">{r.subtitle}</div>
+            {detailLayout === 'right' ? (
+              <>
+                <div className="flex-1 min-w-0 text-sm truncate">{r.title}</div>
+                {r.subtitle && (
+                  <span className="text-xs text-neutral-500 truncate text-right max-w-[50%]">
+                    {r.subtitle}
+                  </span>
+                )}
+                {r.durationMs != null && (
+                  <span className="text-xs text-neutral-500 tabular-nums">
+                    {formatDuration(r.durationMs)}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="text-sm truncate">{r.title}</div>
+                {r.subtitle && (
+                  <div className="text-xs text-neutral-500 truncate">{r.subtitle}</div>
+                )}
+              </>
             )}
           </li>
         )

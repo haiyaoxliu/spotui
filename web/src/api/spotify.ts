@@ -88,7 +88,10 @@ export interface Playlist {
   name: string
   description: string | null
   uri: string
-  tracks: { total: number; href: string }
+  // Spec line 6255 / 6185: `items` is the canonical PlaylistTracksRefObject
+  // on both SimplifiedPlaylistObject and PlaylistObject. The legacy `tracks`
+  // sibling field is `deprecated: true` — never read it.
+  items: { total: number; href: string }
   images: SpotifyImage[]
   owner: { display_name?: string; id: string }
   collaborative: boolean

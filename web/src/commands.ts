@@ -1,4 +1,5 @@
 import {
+  addToQueue,
   next,
   pause,
   play,
@@ -11,6 +12,8 @@ import {
   setVolume,
 } from './api/spotify'
 import { usePlayer } from './store/player'
+import { useSelection } from './store/selection'
+import { useUI } from './store/ui'
 
 // After a transport action, Spotify Connect needs a moment to propagate the
 // new state. Refresh too soon and we risk overwriting our optimistic update
@@ -154,6 +157,42 @@ export async function adjustSeek(deltaMs: number, refresh: Refresh): Promise<voi
   } catch (e) {
     suppress.position = 0
     console.error('seek failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+// Enqueue the focused row (track only). No-op if nothing is focused or the
+// focused row is not a track.
+export async function queueFocused(): Promise<void> {
+  const f = useUI.getState().focusedRow
+  if (!f || !f.isTrack) return
+  try {
+    await addToQueue(f.uri)
+  } catch (e) {
+    console.error('queue focused failed:', e)
+  }
+}
+
+// Play the focused row. Playlist-pane rows play in the open playlist's
+// context (so the rest of the playlist queues up after); search-pane track
+// rows play stand-alone; non-track search rows start their own context.
+export async function playFocused(refresh: Refresh): Promise<void> {
+  const f = useUI.getState().focusedRow
+  if (!f) return
+  try {
+    if (f.pane === 'playlist') {
+      const ctx = useSelection.getState().contextUri
+      if (ctx) await play({ contextUri: ctx, offsetUri: f.uri })
+      else await play({ uris: [f.uri] })
+    } else if (f.isTrack) {
+      await play({ uris: [f.uri] })
+    } else {
+      await play({ contextUri: f.uri })
+    }
+  } catch (e) {
+    console.error('play focused failed:', e)
     void refresh()
     return
   }

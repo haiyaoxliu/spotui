@@ -13,6 +13,8 @@ import {
   isRepeatSuppressed,
   isShuffleSuppressed,
   isVolumeSuppressed,
+  playFocused,
+  queueFocused,
   skipNext,
   skipPrevious,
   toggleLikeCurrent,
@@ -119,8 +121,10 @@ function Player({ me }: { me: Me }) {
   const focusSearch = useUI((s) => s.focusSearch)
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
+  const detailLayout = useUI((s) => s.detailLayout)
   const setTransportPosition = useUI((s) => s.setTransportPosition)
   const setSearchPosition = useUI((s) => s.setSearchPosition)
+  const setDetailLayout = useUI((s) => s.setDetailLayout)
 
   const refresh = useCallback(async () => {
     const [stateRes, queueRes] = await Promise.allSettled([getPlaybackState(), getQueue()])
@@ -234,6 +238,14 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           void toggleLikeCurrent()
           break
+        case 'q':
+          e.preventDefault()
+          void queueFocused()
+          break
+        case 'Enter':
+          e.preventDefault()
+          void playFocused(refresh)
+          break
         case 'd':
           e.preventDefault()
           openDevicePicker()
@@ -267,6 +279,13 @@ function Player({ me }: { me: Me }) {
             title="Toggle search bar position"
           >
             search: {searchPosition}
+          </button>
+          <button
+            onClick={() => setDetailLayout(detailLayout === 'below' ? 'right' : 'below')}
+            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            title="Toggle row detail layout"
+          >
+            details: {detailLayout}
           </button>
           <button
             onClick={() =>

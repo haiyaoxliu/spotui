@@ -1,16 +1,33 @@
 import { usePlayer } from '../store/player'
+import { useUI } from '../store/ui'
 
 export function QueuePanel() {
   const queue = usePlayer((s) => s.queue)
   const items = queue?.queue ?? []
+  const detailLayout = useUI((s) => s.detailLayout)
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-neutral-800">
-        <h3 className="text-xs font-semibold uppercase text-neutral-400 tracking-wider">
+      <div
+        className={
+          'px-4 py-3 border-b border-neutral-800 ' +
+          (detailLayout === 'right' ? 'flex items-baseline gap-3' : '')
+        }
+      >
+        <h3
+          className={
+            'text-xs font-semibold uppercase text-neutral-400 tracking-wider ' +
+            (detailLayout === 'right' ? 'flex-1 min-w-0 truncate' : '')
+          }
+        >
           Up next
         </h3>
-        <p className="text-xs text-neutral-500">
+        <p
+          className={
+            'text-xs text-neutral-500 ' +
+            (detailLayout === 'right' ? 'text-right' : '')
+          }
+        >
           {items.length} queued
         </p>
       </div>
@@ -26,10 +43,26 @@ export function QueuePanel() {
             return (
               <li
                 key={`${item.id}-${idx}`}
-                className="px-4 py-2.5 border-b border-neutral-900"
+                className={
+                  'px-4 py-2.5 border-b border-neutral-900 ' +
+                  (detailLayout === 'right' ? 'flex items-center gap-3' : '')
+                }
               >
-                <div className="text-sm truncate">{item.name}</div>
-                <div className="text-xs text-neutral-500 truncate">{subtitle}</div>
+                {detailLayout === 'right' ? (
+                  <>
+                    <div className="flex-1 min-w-0 text-sm truncate">{item.name}</div>
+                    {subtitle && (
+                      <span className="text-xs text-neutral-500 truncate text-right max-w-[50%]">
+                        {subtitle}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="text-sm truncate">{item.name}</div>
+                    <div className="text-xs text-neutral-500 truncate">{subtitle}</div>
+                  </>
+                )}
               </li>
             )
           })}

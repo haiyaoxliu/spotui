@@ -224,15 +224,15 @@ export async function playFocusedTrackOnly(refresh: Refresh): Promise<void> {
   setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
 }
 
-// Add the focused track to the currently-open playlist. Only valid when the
-// open selection is a playlist (not Liked Songs / Recently Played) and the
-// focused row is a track. The Library panel already filters its list to
-// owned/collab playlists, so any contextId from selection is editable.
+// Add the focused track to the currently-open playlist. No-op unless the
+// focused row is a track AND the open selection is an editable playlist
+// (owned or collaborative). Read-only playlists like Discover Weekly are
+// shown in the library now, but POST /playlists/{id}/items would 403.
 export async function addFocusedToOpenPlaylist(): Promise<void> {
   const f = useUI.getState().focusedRow
   if (!f || !f.isTrack) return
   const sel = useSelection.getState()
-  if (sel.kind !== 'playlist' || !sel.contextId) return
+  if (sel.kind !== 'playlist' || !sel.contextId || !sel.canEdit) return
   try {
     await addItemsToPlaylist(sel.contextId, [f.uri])
   } catch (e) {

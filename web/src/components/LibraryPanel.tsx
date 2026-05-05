@@ -15,50 +15,44 @@ export function LibraryPanel({ ownerId }: { ownerId: string }) {
     return p.owner.id === ownerId || p.collaborative
   }
 
-  // Pinned playlists are exempt from the editable filter (so Discover Weekly
-  // and other Spotify-curated picks can be kept around). Unpinned playlists
-  // still hide non-editable rows since clicking them would 403 unhelpfully
-  // unless the user explicitly pins them.
-  const { pinnedPlaylists, regularPlaylists, hiddenCount } = useMemo(() => {
+  // Show every playlist the user has in their library — the editable ones
+  // and the read-only followed/curated ones. Non-editable rows render in the
+  // external color so it's obvious they don't accept `a` (add-to-playlist).
+  // Pinned ones are pulled out and rendered above the divider, in the user's
+  // pin order.
+  const { pinnedPlaylists, regularPlaylists } = useMemo(() => {
     const pinnedSet = new Set(pinnedIds)
     const pinned: Playlist[] = []
     const regular: Playlist[] = []
-    let hidden = 0
     for (const p of playlists) {
-      if (pinnedSet.has(p.id)) {
-        pinned.push(p)
-      } else if (canEdit(p)) {
-        regular.push(p)
-      } else {
-        hidden++
-      }
+      if (pinnedSet.has(p.id)) pinned.push(p)
+      else regular.push(p)
     }
-    // Sort pinned in the order they appear in pinnedIds so the user's pin
-    // order is preserved across reloads.
     pinned.sort((a, b) => pinnedIds.indexOf(a.id) - pinnedIds.indexOf(b.id))
-    return { pinnedPlaylists: pinned, regularPlaylists: regular, hiddenCount: hidden }
-    // canEdit closes over ownerId; eslint-disable rationale: ownerId is the
-    // only mutable input besides playlists/pinnedIds, and we want recompute
-    // when any of them change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playlists, pinnedIds, ownerId])
+    return { pinnedPlaylists: pinned, regularPlaylists: regular }
+  }, [playlists, pinnedIds])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  const rowClass = (active: boolean) =>
+  const rowClass = (active: boolean, external: boolean = false) =>
     'flex-1 text-left px-4 py-2 text-sm truncate ' +
-    (active ? 'bg-neutral-800 text-green-400' : 'hover:bg-neutral-800')
+    (active
+      ? 'bg-neutral-800 text-[var(--color-accent)]'
+      : external
+        ? 'text-[var(--color-external)] hover:bg-neutral-800'
+        : 'hover:bg-neutral-800')
 
   function PlaylistRow({ pl, pinned }: { pl: Playlist; pinned: boolean }) {
     const active = selKind === 'playlist' && selContextUri === pl.uri
+    const editable = canEdit(pl)
     return (
       <li className="flex items-center group hover:bg-neutral-800/40">
         <button
-          onClick={() => void selectPlaylist(pl, canEdit(pl))}
-          className={rowClass(active)}
-          title={pl.name}
+          onClick={() => void selectPlaylist(pl, editable)}
+          className={rowClass(active, !editable)}
+          title={editable ? pl.name : `${pl.name} (read-only)`}
         >
           {pl.name}
         </button>
@@ -113,18 +107,13 @@ export function LibraryPanel({ ownerId }: { ownerId: string }) {
         )}
         {error && <p className="px-4 py-2 text-sm text-red-400">{error}</p>}
         {loaded && regularPlaylists.length === 0 && pinnedPlaylists.length === 0 && !error && (
-          <p className="px-4 py-2 text-sm text-neutral-500">No editable playlists.</p>
+          <p className="px-4 py-2 text-sm text-neutral-500">No playlists.</p>
         )}
         <ul>
           {regularPlaylists.map((pl) => (
             <PlaylistRow key={pl.id} pl={pl} pinned={false} />
           ))}
         </ul>
-        {loaded && hiddenCount > 0 && (
-          <p className="px-4 py-2 text-[11px] text-neutral-600">
-            {hiddenCount} followed playlist{hiddenCount === 1 ? '' : 's'} hidden — pin to show
-          </p>
-        )}
       </div>
     </aside>
   )

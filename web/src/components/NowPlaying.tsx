@@ -55,7 +55,7 @@ export function NowPlaying() {
               disabled={liked === null}
               className={
                 'text-base leading-none disabled:opacity-40 ' +
-                (liked ? 'text-green-400' : 'text-neutral-500 hover:text-neutral-300')
+                (liked ? 'text-[var(--color-accent)]' : 'text-neutral-500 hover:text-neutral-300')
               }
               title={
                 liked === null

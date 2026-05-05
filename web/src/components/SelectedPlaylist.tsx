@@ -253,7 +253,7 @@ export function SelectedPlaylist({
               onClick={() => setTab(t)}
               className={
                 'flex-1 min-w-[25%] px-4 py-1.5 text-[10px] uppercase tracking-wider text-center hover:bg-neutral-800 border-r border-neutral-800 last:border-r-0 ' +
-                (active ? 'text-green-400' : 'text-neutral-500')
+                (active ? 'text-[var(--color-accent)]' : 'text-neutral-500')
               }
             >
               {t}

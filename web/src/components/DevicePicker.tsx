@@ -114,7 +114,7 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
                     <span className="text-neutral-500 text-xs">({d.type})</span>
                   </span>
                   {d.is_active && (
-                    <span className="text-green-400 text-xs">active</span>
+                    <span className="text-[var(--color-accent)] text-xs">active</span>
                   )}
                   {d.is_restricted && (
                     <span className="text-yellow-500 text-xs ml-2">restricted</span>

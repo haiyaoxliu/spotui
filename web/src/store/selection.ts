@@ -18,6 +18,10 @@ interface SelectionState {
   trackCount: number | null
   totalDurationMs: number | null
   minAddedAt: string | null
+  // True when the current selection accepts mutations (a / add-to-playlist):
+  // owned playlists, collaborative playlists, and Liked Songs. False for
+  // read-only followed playlists and Recently Played.
+  canEdit: boolean
   tracks: Track[]
   loading: boolean
   error: string | null
@@ -35,6 +39,7 @@ export const useSelection = create<SelectionState>((set) => ({
   trackCount: null,
   totalDurationMs: null,
   minAddedAt: null,
+  canEdit: false,
   tracks: [],
   loading: false,
   error: null,
@@ -49,6 +54,7 @@ export const useSelection = create<SelectionState>((set) => ({
       trackCount: p.items?.total ?? null,
       totalDurationMs: null,
       minAddedAt: null,
+      canEdit,
       tracks: [],
       loading: true,
       error: null,
@@ -87,6 +93,7 @@ export const useSelection = create<SelectionState>((set) => ({
       trackCount: null,
       totalDurationMs: null,
       minAddedAt: null,
+      canEdit: false,
       tracks: [],
       loading: true,
       error: null,
@@ -109,6 +116,7 @@ export const useSelection = create<SelectionState>((set) => ({
       trackCount: null,
       totalDurationMs: null,
       minAddedAt: null,
+      canEdit: false,
       tracks: [],
       loading: true,
       error: null,

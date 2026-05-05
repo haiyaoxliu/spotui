@@ -22,6 +22,12 @@ export type DetailLayout = 'below' | 'right'
 const TRANSPORT_KEY = 'ui_transport_position'
 const SEARCH_KEY = 'ui_search_position'
 const DETAIL_KEY = 'ui_detail_layout'
+const ACCENT_KEY = 'ui_accent_color'
+const EXTERNAL_KEY = 'ui_external_color'
+
+// Defaults match the CSS variable seed in styles.css.
+export const DEFAULT_ACCENT = '#4ade80'
+export const DEFAULT_EXTERNAL = '#a1a1aa'
 
 function readTransport(): TransportPosition {
   return localStorage.getItem(TRANSPORT_KEY) === 'right' ? 'right' : 'bottom'
@@ -32,6 +38,17 @@ function readSearch(): SearchPosition {
 function readDetail(): DetailLayout {
   return localStorage.getItem(DETAIL_KEY) === 'right' ? 'right' : 'below'
 }
+function readAccent(): string {
+  return localStorage.getItem(ACCENT_KEY) || DEFAULT_ACCENT
+}
+function readExternal(): string {
+  return localStorage.getItem(EXTERNAL_KEY) || DEFAULT_EXTERNAL
+}
+
+function applyColors(accent: string, external: string): void {
+  document.documentElement.style.setProperty('--color-accent', accent)
+  document.documentElement.style.setProperty('--color-external', external)
+}
 
 interface UIState {
   devicePickerOpen: boolean
@@ -40,6 +57,14 @@ interface UIState {
   helpOpen: boolean
   openHelp: () => void
   closeHelp: () => void
+  colorPickerOpen: boolean
+  openColorPicker: () => void
+  closeColorPicker: () => void
+  accentColor: string
+  externalColor: string
+  setAccentColor: (c: string) => void
+  setExternalColor: (c: string) => void
+  resetColors: () => void
   // Increments on `/` keypress; the search input watches this and refocuses.
   searchFocusTick: number
   focusSearch: () => void
@@ -63,6 +88,27 @@ export const useUI = create<UIState>((set) => ({
   helpOpen: false,
   openHelp: () => set({ helpOpen: true }),
   closeHelp: () => set({ helpOpen: false }),
+  colorPickerOpen: false,
+  openColorPicker: () => set({ colorPickerOpen: true }),
+  closeColorPicker: () => set({ colorPickerOpen: false }),
+  accentColor: readAccent(),
+  externalColor: readExternal(),
+  setAccentColor: (c) => {
+    localStorage.setItem(ACCENT_KEY, c)
+    applyColors(c, readExternal())
+    set({ accentColor: c })
+  },
+  setExternalColor: (c) => {
+    localStorage.setItem(EXTERNAL_KEY, c)
+    applyColors(readAccent(), c)
+    set({ externalColor: c })
+  },
+  resetColors: () => {
+    localStorage.removeItem(ACCENT_KEY)
+    localStorage.removeItem(EXTERNAL_KEY)
+    applyColors(DEFAULT_ACCENT, DEFAULT_EXTERNAL)
+    set({ accentColor: DEFAULT_ACCENT, externalColor: DEFAULT_EXTERNAL })
+  },
   searchFocusTick: 0,
   focusSearch: () => set((s) => ({ searchFocusTick: s.searchFocusTick + 1 })),
   focusedRow: null,
@@ -83,3 +129,7 @@ export const useUI = create<UIState>((set) => ({
     set({ detailLayout: l })
   },
 }))
+
+// Push the persisted colors into CSS variables on first import so the very
+// first paint already reflects user customization.
+applyColors(readAccent(), readExternal())

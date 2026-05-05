@@ -65,7 +65,7 @@ export function TransportBar({
         disabled={disabled}
         className={
           'px-2 py-1 rounded text-sm hover:bg-neutral-800 disabled:opacity-40 ' +
-          (shuffle ? 'text-green-400' : 'text-neutral-500')
+          (shuffle ? 'text-[var(--color-accent)]' : 'text-neutral-500')
         }
         title="Shuffle (s)"
       >
@@ -76,7 +76,7 @@ export function TransportBar({
         disabled={disabled}
         className={
           'px-2 py-1 rounded text-sm hover:bg-neutral-800 disabled:opacity-40 tabular-nums ' +
-          (repeatActive ? 'text-green-400' : 'text-neutral-500')
+          (repeatActive ? 'text-[var(--color-accent)]' : 'text-neutral-500')
         }
         title={`Repeat: ${repeat} (r)`}
       >

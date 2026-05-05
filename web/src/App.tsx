@@ -24,6 +24,7 @@ import {
   toggleShuffle,
 } from './commands'
 import { TransportBar } from './components/TransportBar'
+import { ColorPicker } from './components/ColorPicker'
 import { DevicePicker } from './components/DevicePicker'
 import { HelpOverlay } from './components/HelpOverlay'
 import { LibraryPanel } from './components/LibraryPanel'
@@ -123,6 +124,8 @@ function Player({ me }: { me: Me }) {
   const devicePickerOpen = useUI((s) => s.devicePickerOpen)
   const openHelp = useUI((s) => s.openHelp)
   const helpOpen = useUI((s) => s.helpOpen)
+  const openColorPicker = useUI((s) => s.openColorPicker)
+  const colorPickerOpen = useUI((s) => s.colorPickerOpen)
   const focusSearch = useUI((s) => s.focusSearch)
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
@@ -197,7 +200,7 @@ function Player({ me }: { me: Me }) {
     function onKey(e: KeyboardEvent) {
       const target = e.target as Element | null
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
-      if (devicePickerOpen || helpOpen) return
+      if (devicePickerOpen || helpOpen || colorPickerOpen) return
 
       switch (e.key) {
         case ' ':
@@ -271,11 +274,24 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           openHelp()
           break
+        case 'c':
+          e.preventDefault()
+          openColorPicker()
+          break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [devicePickerOpen, helpOpen, openDevicePicker, openHelp, focusSearch, refresh])
+  }, [
+    devicePickerOpen,
+    helpOpen,
+    colorPickerOpen,
+    openDevicePicker,
+    openHelp,
+    openColorPicker,
+    focusSearch,
+    refresh,
+  ])
 
   return (
     <div className="h-screen flex flex-col">
@@ -321,6 +337,13 @@ function Player({ me }: { me: Me }) {
             Device (d)
           </button>
           <button
+            onClick={openColorPicker}
+            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            title="Customize colors (c)"
+          >
+            Colors (c)
+          </button>
+          <button
             onClick={openHelp}
             className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
             title="Show keybinds (?)"
@@ -354,6 +377,7 @@ function Player({ me }: { me: Me }) {
       )}
       <DevicePicker onAfterTransfer={() => void refresh()} />
       <HelpOverlay />
+      <ColorPicker />
     </div>
   )
 }

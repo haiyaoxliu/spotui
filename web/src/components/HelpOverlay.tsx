@@ -15,6 +15,7 @@ const GLOBAL: Binding[] = [
   { keys: ',  /  .', action: 'Seek -10s / +10s' },
   { keys: '-  /  =  /  +', action: 'Volume -5 / +5' },
   { keys: 'd', action: 'Open device picker' },
+  { keys: 'c', action: 'Customize colors' },
   { keys: '/', action: 'Focus search' },
   { keys: '?', action: 'Toggle this help' },
 ]

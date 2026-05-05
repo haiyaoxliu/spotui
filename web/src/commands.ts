@@ -207,9 +207,14 @@ export async function playFocused(refresh: Refresh): Promise<void> {
       .results.playlists?.items.find((p) => p?.uri === f.uri)
     if (pl) {
       const canEdit = !!ui.userId && (pl.owner.id === ui.userId || pl.collaborative)
-      // fromSearch=true so read-only picks skip the (often 403'd) items
-      // fetch and surface the API-limitation message instead.
-      await sel.selectPlaylist(pl, canEdit, true)
+      // Non-owned playlists have no track list to render, so Enter starts
+      // playing the context instead of loading-into-pane. Owned playlists
+      // still load so the user can pick a specific track.
+      if (canEdit) {
+        await sel.selectPlaylist(pl, canEdit, true)
+      } else {
+        await playContext(pl.uri, refresh)
+      }
     }
     return
   }
@@ -248,6 +253,20 @@ export async function playFocusedTrackOnly(refresh: Refresh): Promise<void> {
     await play({ uris: [f.uri] })
   } catch (e) {
     console.error('play focused (track-only) failed:', e)
+    void refresh()
+    return
+  }
+  setTimeout(() => void refresh(), PROPAGATION_DELAY_MS)
+}
+
+// Start playback in a context (playlist / album / artist). Used for the
+// dblclick / Enter shortcut on read-only playlists that have no track list
+// to drive a per-track play call.
+export async function playContext(uri: string, refresh: Refresh): Promise<void> {
+  try {
+    await play({ contextUri: uri })
+  } catch (e) {
+    console.error('play context failed:', e)
     void refresh()
     return
   }

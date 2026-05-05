@@ -2,9 +2,16 @@ import { useEffect, useMemo } from 'react'
 import { useLibrary } from '../store/library'
 import { useSelection } from '../store/selection'
 import type { Playlist } from '../api/spotify'
+import { playContext, type Refresh } from '../commands'
 import { LoadMoreFooter } from './LoadMoreFooter'
 
-export function LibraryPanel({ ownerId }: { ownerId: string }) {
+export function LibraryPanel({
+  ownerId,
+  onAfterAction,
+}: {
+  ownerId: string
+  onAfterAction: Refresh
+}) {
   const {
     playlists,
     loaded,
@@ -73,8 +80,18 @@ export function LibraryPanel({ ownerId }: { ownerId: string }) {
       <li className={liClass(active)}>
         <button
           onClick={() => void selectPlaylist(pl, editable)}
+          // Non-owned playlists have no track list to interact with, so
+          // dblclick starts playback of the context. Owned playlists' main
+          // affordance is the track list, so we leave dblclick alone.
+          onDoubleClick={
+            editable ? undefined : () => void playContext(pl.uri, onAfterAction)
+          }
           className={titleClass(active, !editable)}
-          title={editable ? pl.name : `${pl.name} (read-only)`}
+          title={
+            editable
+              ? pl.name
+              : `${pl.name} (read-only — double-click to play)`
+          }
         >
           {pl.name}
         </button>

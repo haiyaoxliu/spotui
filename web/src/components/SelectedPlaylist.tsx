@@ -9,7 +9,7 @@ import {
   type SimplifiedAlbum,
   type Track,
 } from '../api/spotify'
-import type { Refresh } from '../commands'
+import { playContext, type Refresh } from '../commands'
 import { LoadMoreFooter } from './LoadMoreFooter'
 
 type Tab = 'tracks' | 'albums' | 'artists' | 'playlists'
@@ -353,19 +353,23 @@ export function SelectedPlaylist({
               <ResultList
                 items={sPlaylists}
                 searchType="playlist"
-                render={(p: Playlist) => ({
-                  key: p.id,
-                  uri: p.uri,
-                  isTrack: false,
-                  title: p.name,
-                  subtitle: p.owner.display_name ?? '',
-                  onPlay: () =>
-                    void selectPlaylist(
-                      p,
-                      p.owner.id === ownerId || p.collaborative,
-                      true,
-                    ),
-                })}
+                render={(p: Playlist) => {
+                  const canEdit = p.owner.id === ownerId || p.collaborative
+                  return {
+                    key: p.id,
+                    uri: p.uri,
+                    isTrack: false,
+                    title: p.name,
+                    subtitle: p.owner.display_name ?? '',
+                    // Owned/collab → load into pane (track list works).
+                    // Non-owned → start playback in the playlist's context,
+                    // since we have no track list to drive a per-track play.
+                    onPlay: () =>
+                      canEdit
+                        ? void selectPlaylist(p, true, true)
+                        : void playContext(p.uri, onAfterPlay),
+                  }
+                }}
               />
             )}
           </>

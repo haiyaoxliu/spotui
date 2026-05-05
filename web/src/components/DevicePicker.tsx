@@ -43,6 +43,7 @@ export function DevicePicker({ onAfterTransfer }: { onAfterTransfer: () => void 
     }
 
     function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'Escape') {
         e.preventDefault()
         close()

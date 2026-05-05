@@ -206,6 +206,9 @@ function Player({ me }: { me: Me }) {
       const target = e.target as Element | null
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
       if (devicePickerOpen || helpOpen || colorPickerOpen) return
+      // Don't intercept browser shortcuts. Plain shift is fine — '?' and
+      // '+' are reachable as shifted characters and we want those to work.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
 
       switch (e.key) {
         case ' ':
@@ -372,7 +375,7 @@ function Player({ me }: { me: Me }) {
         </div>
       </header>
       <main className="flex-1 overflow-hidden flex">
-        <LibraryPanel ownerId={me.id} />
+        <LibraryPanel ownerId={me.id} onAfterAction={() => void refresh()} />
         <SelectedPlaylist
           onAfterPlay={() => void refresh()}
           searchPosition={searchPosition}

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { usePlayer } from '../store/player'
 import {
   adjustVolume,
@@ -9,6 +10,12 @@ import {
   type Refresh,
 } from '../commands'
 import { ProgressBar } from './ProgressBar'
+
+// Below this px width, the volume slider stops being readable in the right
+// panel and we drop to a − / number / + button group instead. The full bar
+// (label + 48px slider + number) renders at ~116px, so 120 leaves a hair of
+// breathing room before the swap.
+const VOLUME_BAR_MIN_WIDTH = 120
 
 export function TransportBar({
   onAfterAction,
@@ -25,6 +32,22 @@ export function TransportBar({
   const repeat = playback?.repeat_state ?? 'off'
   const volume = device?.volume_percent ?? null
   const disabled = !playback
+
+  // Width-driven swap between the slider and a +/- group. Only matters in
+  // compact mode (the bottom transport always has plenty of room).
+  const volumeWrapperRef = useRef<HTMLDivElement>(null)
+  const [volumeMode, setVolumeMode] = useState<'bar' | 'buttons'>('bar')
+  useEffect(() => {
+    if (!compact) return
+    const el = volumeWrapperRef.current
+    if (!el) return
+    const obs = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0
+      setVolumeMode(w >= VOLUME_BAR_MIN_WIDTH ? 'bar' : 'buttons')
+    })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [compact])
 
   const repeatLabel = repeat === 'track' ? '↻¹' : '↻'
   const repeatActive = repeat !== 'off'
@@ -85,7 +108,8 @@ export function TransportBar({
     </div>
   )
 
-  const volumeUI = (
+  const barWidthClass = compact ? 'w-12' : 'w-20'
+  const volumeBarUI = (
     <div
       className="flex items-center gap-2 text-xs text-neutral-500 select-none"
       onWheel={(e) => {
@@ -95,24 +119,52 @@ export function TransportBar({
       }}
     >
       <span>vol</span>
-      <div className="w-20 h-1 bg-neutral-800 rounded overflow-hidden">
+      <div className={`${barWidthClass} h-1 bg-neutral-800 rounded overflow-hidden`}>
         <div className="h-full bg-neutral-500" style={{ width: `${volume ?? 0}%` }} />
       </div>
       <span className="tabular-nums w-8 text-right">{volume == null ? '—' : volume}</span>
     </div>
   )
 
+  const volumeButtonsUI = (
+    <div className="flex items-center gap-1 text-xs text-neutral-500 select-none">
+      <button
+        onClick={() => void adjustVolume(-5, onAfterAction)}
+        disabled={disabled}
+        className="px-1.5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 leading-tight"
+        title="Volume -5 (-)"
+      >
+        −
+      </button>
+      <span className="tabular-nums w-7 text-center">
+        {volume == null ? '—' : volume}
+      </span>
+      <button
+        onClick={() => void adjustVolume(5, onAfterAction)}
+        disabled={disabled}
+        className="px-1.5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 leading-tight"
+        title="Volume +5 (=)"
+      >
+        +
+      </button>
+    </div>
+  )
+
+  const volumeUI = compact && volumeMode === 'buttons' ? volumeButtonsUI : volumeBarUI
+
   if (compact) {
+    // Two-column grid so column 1 (auto) snaps to whichever child is widest
+    // — that's the playButtons row, ~150px. The scrub bar in row 2 then
+    // inherits the same 150px and visually sits directly under prev/play/
+    // next. Column 2 (1fr) holds modes and the compressed volume on the
+    // right; volumeUI swaps to a +/- group when its cell drops below
+    // VOLUME_BAR_MIN_WIDTH.
     return (
-      <div className="border-b border-neutral-800 px-3 py-2 flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          {playButtons}
-          {modes}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <ProgressBar onAfterAction={onAfterAction} />
-          </div>
+      <div className="border-b border-neutral-800 px-3 py-2 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+        {playButtons}
+        <div className="flex justify-end">{modes}</div>
+        <ProgressBar onAfterAction={onAfterAction} />
+        <div ref={volumeWrapperRef} className="flex justify-end min-w-0">
           {volumeUI}
         </div>
       </div>

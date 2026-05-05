@@ -363,10 +363,13 @@ export function SelectedPlaylist({
           {playlistSection}
         </>
       ) : (
+        // search: below — keep the input pinned at the bottom of the pane
+        // and float the results above it so they read upward toward the
+        // playlist listing.
         <>
           {playlistSection}
-          {searchInput}
           {searchResults}
+          {searchInput}
         </>
       )}
     </div>

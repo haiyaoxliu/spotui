@@ -37,6 +37,9 @@ interface UIState {
   devicePickerOpen: boolean
   openDevicePicker: () => void
   closeDevicePicker: () => void
+  helpOpen: boolean
+  openHelp: () => void
+  closeHelp: () => void
   // Increments on `/` keypress; the search input watches this and refocuses.
   searchFocusTick: number
   focusSearch: () => void
@@ -57,6 +60,9 @@ export const useUI = create<UIState>((set) => ({
   devicePickerOpen: false,
   openDevicePicker: () => set({ devicePickerOpen: true }),
   closeDevicePicker: () => set({ devicePickerOpen: false }),
+  helpOpen: false,
+  openHelp: () => set({ helpOpen: true }),
+  closeHelp: () => set({ helpOpen: false }),
   searchFocusTick: 0,
   focusSearch: () => set((s) => ({ searchFocusTick: s.searchFocusTick + 1 })),
   focusedRow: null,

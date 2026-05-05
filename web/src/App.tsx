@@ -25,6 +25,7 @@ import {
 } from './commands'
 import { TransportBar } from './components/TransportBar'
 import { DevicePicker } from './components/DevicePicker'
+import { HelpOverlay } from './components/HelpOverlay'
 import { LibraryPanel } from './components/LibraryPanel'
 import { SelectedPlaylist } from './components/SelectedPlaylist'
 import { RightPanel } from './components/RightPanel'
@@ -120,6 +121,8 @@ function Player({ me }: { me: Me }) {
   const setQueue = usePlayer((s) => s.setQueue)
   const openDevicePicker = useUI((s) => s.openDevicePicker)
   const devicePickerOpen = useUI((s) => s.devicePickerOpen)
+  const openHelp = useUI((s) => s.openHelp)
+  const helpOpen = useUI((s) => s.helpOpen)
   const focusSearch = useUI((s) => s.focusSearch)
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
@@ -194,7 +197,7 @@ function Player({ me }: { me: Me }) {
     function onKey(e: KeyboardEvent) {
       const target = e.target as Element | null
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
-      if (devicePickerOpen) return
+      if (devicePickerOpen || helpOpen) return
 
       switch (e.key) {
         case ' ':
@@ -264,11 +267,15 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           focusSearch()
           break
+        case '?':
+          e.preventDefault()
+          openHelp()
+          break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [devicePickerOpen, openDevicePicker, focusSearch, refresh])
+  }, [devicePickerOpen, helpOpen, openDevicePicker, openHelp, focusSearch, refresh])
 
   return (
     <div className="h-screen flex flex-col">
@@ -314,6 +321,13 @@ function Player({ me }: { me: Me }) {
             Device (d)
           </button>
           <button
+            onClick={openHelp}
+            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+            title="Show keybinds (?)"
+          >
+            ?
+          </button>
+          <button
             onClick={() => {
               logout()
               window.location.reload()
@@ -339,6 +353,7 @@ function Player({ me }: { me: Me }) {
         <TransportBar onAfterAction={() => void refresh()} />
       )}
       <DevicePicker onAfterTransfer={() => void refresh()} />
+      <HelpOverlay />
     </div>
   )
 }

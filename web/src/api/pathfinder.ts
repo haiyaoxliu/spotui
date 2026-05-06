@@ -660,6 +660,32 @@ interface PfEpisodePartial {
   duration?: { totalMilliseconds?: number }
 }
 
+/** Side-channel observer the library store registers to receive owner
+ *  metadata learned during a fetchPlaylist call. Lets us correct the
+ *  canEdit heuristic without a separate metadata round trip. Module-level
+ *  observer instead of a store import to avoid a circular dependency
+ *  (library imports pathfinder for fetchLibraryEntries). */
+export interface PlaylistMetaUpdate {
+  playlistId: string
+  ownerId: string
+  ownerDisplayName?: string
+}
+type PlaylistMetaObserver = (meta: PlaylistMetaUpdate) => void
+let playlistMetaObserver: PlaylistMetaObserver | null = null
+
+export function setPlaylistMetaObserver(
+  fn: PlaylistMetaObserver | null,
+): void {
+  playlistMetaObserver = fn
+}
+
+interface PlaylistV2WithOwner extends PlaylistV2 {
+  uri?: string
+  ownerV2?: {
+    data?: { uri?: string; username?: string; displayName?: string; name?: string }
+  } | null
+}
+
 async function playlistTracksViaPathfinder(
   playlistId: string,
   limit: number,
@@ -670,13 +696,29 @@ async function playlistTracksViaPathfinder(
     `/api/proxy/playlist/${encodeURIComponent(playlistId)}/items?${params}`,
   )
   if (!res.ok) throw new Error(`playlist items ${res.status}`)
-  const env = (await res.json()) as { data?: { playlistV2?: PlaylistV2 } }
+  const env = (await res.json()) as { data?: { playlistV2?: PlaylistV2WithOwner } }
   const pl = env.data?.playlistV2
   const items = (pl?.content?.items ?? []).flatMap((it) => {
     const mapped = mapPlaylistItem(it)
     return mapped ? [mapped] : []
   })
   const total = pl?.content?.totalCount ?? items.length
+
+  // Backfill owner metadata into the library store (if registered). Only
+  // the first response per playlist is interesting; subsequent paginations
+  // re-emit the same owner harmlessly.
+  const ownerUri = pl?.ownerV2?.data?.uri ?? ''
+  if (playlistMetaObserver && ownerUri) {
+    playlistMetaObserver({
+      playlistId,
+      ownerId: idFromUri(ownerUri),
+      ownerDisplayName:
+        pl?.ownerV2?.data?.displayName ??
+        pl?.ownerV2?.data?.name ??
+        pl?.ownerV2?.data?.username,
+    })
+  }
+
   return {
     items,
     nextPath: nextPath(

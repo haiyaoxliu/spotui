@@ -1,7 +1,12 @@
 import { create } from 'zustand'
 import type { Playlist } from '../api/spotify'
 import { fetchPage, PLAYLISTS_PAGE_PATH } from '../api/spotify'
-import { fetchLibraryEntries, type LibraryEntry } from '../api/pathfinder'
+import {
+  fetchLibraryEntries,
+  setPlaylistMetaObserver,
+  type LibraryEntry,
+  type PlaylistMetaUpdate,
+} from '../api/pathfinder'
 
 const PINNED_KEY = 'library_pinned_ids'
 const EXPANDED_KEY = 'library_expanded_folders'
@@ -96,6 +101,11 @@ interface LibraryState {
   toggleFolder: (uri: string) => Promise<void>
   pin: (id: string) => void
   unpin: (id: string) => void
+  /** Patch a playlist entry's owner from a fetchPlaylist callback. The
+   *  initial libraryV3 response doesn't include owner.id per row, so we
+   *  default canEdit=true and correct here once the user actually opens
+   *  the playlist. */
+  updatePlaylistOwner: (meta: PlaylistMetaUpdate) => void
 }
 
 export const useLibrary = create<LibraryState>((set, get) => ({
@@ -222,4 +232,48 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     writePinned(updated)
     set({ pinnedIds: updated })
   },
+
+  updatePlaylistOwner: ({ playlistId, ownerId, ownerDisplayName }) => {
+    const patchPlaylist = (e: LibraryEntry): LibraryEntry => {
+      if (e.kind !== 'playlist' || e.playlist.id !== playlistId) return e
+      // Skip the update if the owner is already correct — avoids a state
+      // churn when the user re-opens the same playlist.
+      if (
+        e.playlist.owner.id === ownerId &&
+        (ownerDisplayName === undefined ||
+          e.playlist.owner.display_name === ownerDisplayName)
+      ) {
+        return e
+      }
+      return {
+        ...e,
+        playlist: {
+          ...e.playlist,
+          owner: {
+            ...e.playlist.owner,
+            id: ownerId,
+            display_name: ownerDisplayName ?? e.playlist.owner.display_name,
+          },
+        },
+      }
+    }
+
+    const baseEntries = get().baseEntries.map(patchPlaylist)
+    const folderChildren: Record<string, LibraryEntry[]> = {}
+    for (const [uri, arr] of Object.entries(get().folderChildren)) {
+      folderChildren[uri] = arr.map(patchPlaylist)
+    }
+    set({
+      baseEntries,
+      folderChildren,
+      playlists: deriveAllPlaylists(baseEntries, folderChildren),
+    })
+  },
 }))
+
+// Wire the side-channel observer once at module init. Pathfinder calls this
+// whenever a fetchPlaylist response includes ownerV2 metadata, which is the
+// first time we know the actual owner for a given playlist.
+setPlaylistMetaObserver((meta) => {
+  useLibrary.getState().updatePlaylistOwner(meta)
+})

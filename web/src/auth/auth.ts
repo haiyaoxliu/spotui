@@ -212,33 +212,52 @@ export async function refresh(): Promise<string> {
   return next.access_token
 }
 
-/** Bearer for `api.spotify.com/v1` calls. Prefers PKCE when available
- *  because:
- *    - PKCE bearers are issued under our private dev-app `client_id`,
- *      which has its own rate-limit pool. The cookie-mint bearer is
- *      issued under Spotify's Web Player `client_id` — a high-traffic,
- *      heavily-monitored pool that 429s an account quickly under heavy
- *      use. Splitting traffic by client_id is the only way to avoid the
- *      Web Player pool's tighter limits.
- *    - PKCE bearers have explicit OAuth scopes; the Web Player bearer's
- *      scopes are implicit and sometimes narrower for /v1 endpoints.
- *  Falls back to the cookie-mint bearer if no PKCE tokens are stored. */
+/** Bearer for `api.spotify.com/v1` calls. Prefers the cookie-mint bearer
+ *  when available so that `/v1` traffic stays on the same auth pool as
+ *  Pathfinder / connect-state / spclient — keeps the app on a single
+ *  consistent identity for Spotify's per-account rate-limit accounting,
+ *  and matches the preference used everywhere else in the SPA.
+ *
+ *  PKCE is the fallback. It uses our private dev-app `client_id` (a
+ *  separate rate-limit pool from Spotify's Web Player), which `api/client.ts`
+ *  escalates to on a 429 from the cookie pool, and which we fall through
+ *  to here when the sidecar can't mint a cookie bearer at all. */
 export async function getAccessToken(): Promise<string | null> {
+  if (cookieMode) {
+    try {
+      return await getCookieToken()
+    } catch (e) {
+      // Sidecar mint failed (cookies expired, network blip, etc). Fall
+      // through to PKCE if it's connected — that's the "lack of coverage"
+      // half of the policy.
+      console.warn('[spotui] cookie bearer mint failed, trying PKCE:', e)
+    }
+  }
   const tokens = loadTokens()
   if (tokens) {
     if (Date.now() >= tokens.expires_at - 60_000) return refresh()
     return tokens.access_token
   }
-  if (cookieMode) return getCookieToken()
   return null
+}
+
+/** PKCE bearer specifically — bypasses the cookie-first preference in
+ *  `getAccessToken`. Used by `api/client.ts` to escape Web Player rate
+ *  limits on 429 by retrying with the private-app pool. Returns null
+ *  when PKCE isn't connected; callers must fall back gracefully. */
+export async function getPkceAccessToken(): Promise<string | null> {
+  const tokens = loadTokens()
+  if (!tokens) return null
+  if (Date.now() >= tokens.expires_at - 60_000) return refresh()
+  return tokens.access_token
 }
 
 /** Which bearer pool getAccessToken() will produce on the *next* call.
  *  Lets `api/client.ts` route 401-retries to the right refresh path
- *  (PKCE token rotation vs. cookie-mint re-mint). */
+ *  (cookie-mint re-mint vs. PKCE token rotation). */
 export function tokenKind(): 'pkce' | 'cookie' | null {
-  if (loadTokens()) return 'pkce'
   if (cookieMode) return 'cookie'
+  if (loadTokens()) return 'pkce'
   return null
 }
 

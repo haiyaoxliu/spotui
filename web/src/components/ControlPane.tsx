@@ -139,16 +139,22 @@ export function ControlPane() {
 /**
  * Shows which auth pools are active and offers a PKCE bootstrap button.
  *
- * Cookie-mint tokens use Spotify's Web Player client_id, which shares a
- * rate-limit pool with millions of open.spotify.com sessions and 429s
- * easily. A PKCE bearer (private dev-app client_id) is on a separate
- * pool — connecting it gives /v1 calls a quieter neighbor and acts as a
- * fallback when cookie /v1/me is rate-limited.
+ * Cookie-mint tokens (Spotify's Web Player client_id) are the primary
+ * pool — they're what Pathfinder, connect-state, spclient, AND /v1 use,
+ * so the SPA stays on a single identity per Spotify's rate-limit
+ * accounting. Connecting a PKCE bearer (private dev-app client_id) adds
+ * a separate pool that `api/client.ts` escalates to on a 429 from the
+ * cookie pool — a quieter neighbor for the rare /v1 calls that come
+ * under heavy load.
  */
 function AuthStatusRows() {
   const cookie = isCookieMode()
   const pkce = hasPkce()
-  const v1Source = pkce ? 'PKCE (dev app)' : cookie ? 'cookie (Web Player)' : 'none'
+  const v1Source = cookie
+    ? `cookie (Web Player)${pkce ? ' · PKCE on 429' : ''}`
+    : pkce
+      ? 'PKCE (dev app)'
+      : 'none'
   return (
     <div className="space-y-2 text-xs">
       <Row label="Cookie session" value={cookie ? 'active' : 'off'} ok={cookie} />
@@ -160,7 +166,7 @@ function AuthStatusRows() {
             void login()
           }}
           className="w-full text-left mt-2 px-3 py-2 rounded bg-neutral-200/60 hover:bg-neutral-200 dark:bg-neutral-800/60 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200"
-          title="Run the OAuth flow to get a private-client /v1 bearer (separate rate-limit pool)"
+          title="Run the OAuth flow to get a private-client /v1 bearer (separate rate-limit pool, used as 429 fallback)"
         >
           Connect Spotify dev app for /v1 fallback…
         </button>

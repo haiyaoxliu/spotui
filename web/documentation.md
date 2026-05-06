@@ -32,17 +32,26 @@ Spotify endpoints
 
 Two parallel auth paths exist:
 
-- **PKCE** — classic OAuth using `VITE_SPOTIFY_CLIENT_ID` (a private dev app).
-  Bearer issued by `accounts.spotify.com/api/token`. Stored in `localStorage`.
-  Used only for `/v1/*` calls. Separate rate-limit pool.
-- **Cookie** — `sp_dc` from Safari (or pasted) → mint web-player bearer at
-  `open.spotify.com/api/token`. Held by sidecar in memory. Carries elevated
-  scopes (Pathfinder, spclient, connect-state). Same client_id pool as
-  Spotify's web player, so heavily rate-limited.
+- **Cookie** (primary) — `sp_dc` from Safari (or pasted) → mint web-player
+  bearer at `open.spotify.com/api/token`. Held by sidecar in memory. Carries
+  elevated scopes (Pathfinder, spclient, connect-state). Same client_id pool
+  as Spotify's web player, so heavily rate-limited but consistent across
+  every API surface the app uses.
+- **PKCE** (fallback) — classic OAuth using `VITE_SPOTIFY_CLIENT_ID` (a
+  private dev app). Bearer issued by `accounts.spotify.com/api/token`.
+  Stored in `localStorage`. Only valid for `/v1/*`. Separate rate-limit
+  pool.
 
-Both can be active at once. When PKCE tokens exist, the SPA prefers PKCE for
-`/v1` (`api/client.ts`) because of the rate-limit difference; cookie bearers
-are otherwise used for everything else.
+Preference order across the SPA:
+
+| Endpoint family | Primary | Fallback |
+|---|---|---|
+| Pathfinder, spclient, connect-state | cookie (only valid pool) | none — `/v1` for `search` / `fetchPage` / cluster reads on retryable errors |
+| `/v1` (when called as primary or as fallback) | cookie bearer | PKCE bearer on 429 (`api/client.ts` escalates) or on cookie mint failure (`getAccessToken` falls through) |
+| Boot `/v1/me` | cookie via sidecar (`fetchMe`) | PKCE `/v1/me` on throw, or to upgrade a degraded `_source: 'www-fallback'` profile when PKCE is connected |
+
+Both pools can be active at once; the cookie pool is always preferred when
+present. PKCE is strictly the rate-limit/coverage escape hatch.
 
 ---
 
@@ -412,8 +421,12 @@ The single source of "user actions that change playback or library state."
   `isLoggedIn()`, `logout()`.
 - PKCE flow: `login()`, `handleCallback()`, `refresh()`, internal
   `saveTokens` / `loadTokens` against localStorage `spotify_tokens`.
-- `getAccessToken()` — bearer dispatcher; PKCE preferred when present (split
-  rate-limit pool), cookie otherwise.
+- `getAccessToken()` — bearer dispatcher; cookie preferred when
+  available, falls through to PKCE on cookie mint failure or when no
+  cookie session is active.
+- `getPkceAccessToken()` — PKCE bearer specifically. Bypasses the
+  cookie-first preference; used by `api/client.ts` to escalate to PKCE
+  on a 429 from the cookie pool. Returns null when PKCE isn't connected.
 - `requireClientId()` — surfaces a clean error when env var is missing.
 
 #### `pkce.ts`
@@ -425,7 +438,14 @@ The single source of "user actions that change playback or library state."
 #### `client.ts`
 - `api<T>(path, init?): Promise<T | null>` — single chokepoint for all
   `api.spotify.com/v1/*` calls.
-- 401 retry: PKCE → `refresh()`, cookie → `clearCookieToken()` + re-mint.
+- Bearer pool picked by `getAccessToken()` (cookie preferred, PKCE
+  fallback). `tokenKind()` snapshot drives the retry strategy.
+- 401 retry: cookie → `clearCookieToken()` + re-mint, PKCE → `refresh()`.
+  Same pool, fresh token.
+- 429 escalation: when the cookie pool 429s and PKCE is connected, retry
+  the same request with `getPkceAccessToken()` and surface a console-bar
+  warning. No reverse direction (PKCE→cookie) since cookie is already
+  the preferred pool.
 - 204 → `null`. Non-2xx → throws `Error("Spotify {METHOD} {path}: {status}
   {body}")`.
 

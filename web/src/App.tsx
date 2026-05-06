@@ -47,6 +47,10 @@ interface Me {
   email?: string
   product: 'premium' | 'free' | 'open'
   country?: string
+  /** Set by the sidecar when /v1/me was rate-limited and the response
+   *  came from www.spotify.com instead. Boot uses this to escalate to
+   *  PKCE for a full profile when one is connected. */
+  _source?: 'www-fallback'
 }
 
 export function App() {
@@ -64,12 +68,33 @@ export function App() {
         }
         const kind = await bootstrapAuth()
         if (kind === 'none') return
-        // Bearer preference for /v1/me:
-        //   - PKCE if available — separate rate-limit pool from Spotify's
-        //     Web Player client_id (which the cookie-mint token uses).
-        //   - Otherwise, hit the sidecar's /api/me (cookie bearer with
-        //     www-profile fallback on 429 and a disk cache for restarts).
-        const data = hasPkce() ? await api<Me>('/me') : await fetchMe()
+        // Bearer preference for /v1/me, matching the rest of the SPA:
+        //   1. Cookie path via the sidecar's /api/me (cached, with a
+        //      www-profile fallback when /v1/me 429s).
+        //   2. Escalate to PKCE if the cookie path threw, or if the
+        //      sidecar served a degraded www-fallback profile and we
+        //      have a PKCE bearer available — PKCE is on a separate
+        //      rate-limit pool and recovers the full id/name/product
+        //      shape.
+        let data: Me | null = null
+        try {
+          data = await fetchMe()
+          if (data?._source === 'www-fallback' && hasPkce()) {
+            try {
+              const fresh = await api<Me>('/me')
+              if (fresh) data = fresh
+            } catch (e) {
+              console.warn('[spotui] PKCE /v1/me upgrade failed; staying on www profile:', e)
+            }
+          }
+        } catch (e) {
+          if (hasPkce()) {
+            console.warn('[spotui] /api/me failed, falling back to PKCE /v1/me:', e)
+            data = await api<Me>('/me')
+          } else {
+            throw e
+          }
+        }
         if (!cancelled && data) {
           setMe(data)
           useUI.getState().setUserId(data.id)

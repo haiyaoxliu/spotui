@@ -73,6 +73,41 @@ function snapshotOf(s: SelectionState): PriorSelection | null {
   return null
 }
 
+/**
+ * Per-id cache of fetched playlist track lists. Lets the user click between
+ * playlists and back without re-fetching. 5-min TTL is a pragmatic balance
+ * between freshness (Spotify-side edits show up reasonably fast) and
+ * avoiding the dev-mode quota churn.
+ *
+ * Module-scoped so it survives across selection-state changes; cleared
+ * on hard reload like every other in-memory cache.
+ */
+interface CachedTracks {
+  tracks: Track[]
+  tracksNextPath: string | null
+  totalDurationMs: number | null
+  minAddedAt: string | null
+  trackCount: number | null
+  fetchedAt: number
+}
+
+const PLAYLIST_TRACKS_TTL_MS = 5 * 60 * 1000
+const playlistTracksCache = new Map<string, CachedTracks>()
+
+function readCachedTracks(playlistId: string): CachedTracks | null {
+  const hit = playlistTracksCache.get(playlistId)
+  if (!hit) return null
+  if (Date.now() - hit.fetchedAt > PLAYLIST_TRACKS_TTL_MS) {
+    playlistTracksCache.delete(playlistId)
+    return null
+  }
+  return hit
+}
+
+function writeCachedTracks(playlistId: string, value: CachedTracks): void {
+  playlistTracksCache.set(playlistId, value)
+}
+
 export const useSelection = create<SelectionState>((set, get) => {
   // Internal: was this selectXxx call invoked from goBack? If so, don't
   // overwrite `prior`. Set transiently inside goBack and consumed on the
@@ -105,31 +140,40 @@ export const useSelection = create<SelectionState>((set, get) => {
 
     selectPlaylist: async (p, canEdit) => {
       const prior = maybeCaptureprior()
+      // If we have a fresh cache hit for this playlist, render it
+      // immediately and skip the network entirely. This makes
+      // playlist-A → playlist-B → playlist-A feel instant.
+      const cached = readCachedTracks(p.id)
       set({
         kind: 'playlist',
         contextUri: p.uri,
         contextId: p.id,
         name: p.name,
         owner: p.owner?.display_name ?? null,
-        trackCount: p.items?.total ?? null,
-        totalDurationMs: null,
-        minAddedAt: null,
+        trackCount: cached?.trackCount ?? p.items?.total ?? null,
+        totalDurationMs: cached?.totalDurationMs ?? null,
+        minAddedAt: cached?.minAddedAt ?? null,
         canEdit,
-        tracks: [],
-        loading: true,
+        tracks: cached?.tracks ?? [],
+        loading: cached === null,
         error: null,
-        tracksNextPath: null,
+        tracksNextPath: cached?.tracksNextPath ?? null,
         loadingMoreTracks: false,
         lastPlaylist: p,
         lastAlbum: null,
         prior,
       })
+      if (cached) return
+
       // Pathfinder's fetchPlaylist (via fetchPage) works on every playlist
-      // regardless of ownership — including editorial / followed picks
-      // that 403 against the public Web API in dev mode. One code path
-      // for all callers; canEdit is now used purely to gate write ops.
+      // regardless of ownership. One code path for all callers; canEdit
+      // is used purely to gate write ops.
       try {
         const slice = await fetchPage<PlaylistItem>(PLAYLIST_ITEMS_PAGE_PATH(p.id))
+        // Race guard: if the user has already navigated away to a
+        // different selection by the time we get here, drop the response
+        // on the floor — but still populate the cache so a later return
+        // is instant.
         const tracks = slice.items
           .map((i: PlaylistItem) => i.item ?? i.track ?? null)
           .filter((t): t is Track => !!t && t.type === 'track')
@@ -140,16 +184,28 @@ export const useSelection = create<SelectionState>((set, get) => {
             minAddedAt = i.added_at
           }
         }
+        const trackCount = slice.total ?? get().trackCount
+        writeCachedTracks(p.id, {
+          tracks,
+          tracksNextPath: slice.nextPath,
+          totalDurationMs,
+          minAddedAt,
+          trackCount,
+          fetchedAt: Date.now(),
+        })
+        if (get().contextId !== p.id) return
         set({
           tracks,
           totalDurationMs,
           minAddedAt,
           tracksNextPath: slice.nextPath,
-          trackCount: slice.total ?? get().trackCount,
+          trackCount,
           loading: false,
         })
       } catch (e) {
-        set({ error: e instanceof Error ? e.message : String(e), loading: false })
+        if (get().contextId === p.id) {
+          set({ error: e instanceof Error ? e.message : String(e), loading: false })
+        }
       }
     },
 

@@ -15,7 +15,8 @@ export function LibraryPanel({
   onAfterAction: Refresh
 }) {
   const {
-    entries,
+    baseEntries,
+    folderChildren,
     playlists,
     expandedFolders,
     loaded,
@@ -60,11 +61,10 @@ export function LibraryPanel({
     return pinned
   }, [playlists, pinnedIds])
 
-  // Group folders + their contents separately from top-level playlists so
-  // the panel reads as two clean sections instead of an interleaved list.
-  // We treat the entries list as a sequence; a Folder row at depth=0 begins
-  // a "folder block" that runs through every following depth>0 row up to
-  // the next depth=0 row. Top-level playlists go into a separate bucket.
+  // Folders and top-level playlists render as two clean sections.
+  // baseEntries already holds depth=0 entries; for each folder we look up
+  // its (possibly cached) children and skip pinned ones since those float
+  // to the top regardless.
   type FolderBlock = {
     folder: Extract<LibraryEntry, { kind: 'folder' }>
     children: LibraryEntry[]
@@ -73,36 +73,28 @@ export function LibraryPanel({
     const pinnedSet = new Set(pinnedIds)
     const blocks: FolderBlock[] = []
     const topLevel: Extract<LibraryEntry, { kind: 'playlist' }>[] = []
-    let current: FolderBlock | null = null
-    for (const e of entries) {
-      if (e.kind === 'folder' && e.depth === 0) {
-        current = { folder: e, children: [] }
-        blocks.push(current)
+    for (const e of baseEntries) {
+      if (e.kind === 'folder') {
+        const rawChildren = folderChildren[e.uri] ?? []
+        const filtered = rawChildren.filter(
+          (c) => !(c.kind === 'playlist' && pinnedSet.has(c.playlist.id)),
+        )
+        blocks.push({ folder: e, children: filtered })
         continue
       }
-      // Anything at depth > 0 belongs to the most recently opened folder
-      // block. If there is no block (shouldn't happen in practice), fall
-      // through to top-level so we don't drop the row.
-      if (e.depth > 0 && current) {
-        if (e.kind === 'playlist' && pinnedSet.has(e.playlist.id)) continue
-        current.children.push(e)
-        continue
-      }
-      // depth=0 playlist (or stray nested folder with no parent block)
-      current = null
       if (e.kind === 'playlist' && !pinnedSet.has(e.playlist.id)) {
         topLevel.push(e)
       }
     }
     return { folderBlocks: blocks, topLevelPlaylists: topLevel }
-  }, [entries, pinnedIds])
+  }, [baseEntries, folderChildren, pinnedIds])
 
-  // Fallback flat list for PKCE-only mode (entries empty).
+  // Fallback flat list for PKCE-only mode (baseEntries empty).
   const regularPlaylistsFlat = useMemo(() => {
-    if (entries.length > 0) return [] // entries-mode renders via folderBlocks + topLevelPlaylists
+    if (baseEntries.length > 0) return []
     const pinnedSet = new Set(pinnedIds)
     return playlists.filter((p) => !pinnedSet.has(p.id))
-  }, [entries, playlists, pinnedIds])
+  }, [baseEntries, playlists, pinnedIds])
 
   useEffect(() => {
     void load()
@@ -286,28 +278,33 @@ export function LibraryPanel({
           </p>
         )}
 
-        {/* Folders section — every folder block (depth=0 folder + its
-         *  expanded children) lives here, separate from top-level playlists. */}
+        {/* Folders section — each block is the folder row; its children
+         *  render only when the folder is currently expanded. Children
+         *  are cached, so collapse → reopen is instant with no refetch. */}
         {folderBlocks.length > 0 && (
           <>
             <SectionHeader>Folders</SectionHeader>
             <ul>
-              {folderBlocks.map((block, blockIdx) => (
-                <li key={`block:${block.folder.uri}:${blockIdx}`}>
-                  <ul>
-                    <FolderRow
-                      uri={block.folder.uri}
-                      name={block.folder.name}
-                      depth={0}
-                      playlistCount={block.folder.playlistCount}
-                      folderCount={block.folder.folderCount}
-                    />
-                    {block.children.map((child, idx) =>
-                      renderChildEntry(child, idx),
-                    )}
-                  </ul>
-                </li>
-              ))}
+              {folderBlocks.map((block, blockIdx) => {
+                const expanded = expandedFolders.has(block.folder.uri)
+                return (
+                  <li key={`block:${block.folder.uri}:${blockIdx}`}>
+                    <ul>
+                      <FolderRow
+                        uri={block.folder.uri}
+                        name={block.folder.name}
+                        depth={0}
+                        playlistCount={block.folder.playlistCount}
+                        folderCount={block.folder.folderCount}
+                      />
+                      {expanded &&
+                        block.children.map((child, idx) =>
+                          renderChildEntry(child, idx),
+                        )}
+                    </ul>
+                  </li>
+                )
+              })}
             </ul>
           </>
         )}
@@ -319,7 +316,7 @@ export function LibraryPanel({
           <>
             <SectionHeader>Playlists</SectionHeader>
             <ul>
-              {entries.length > 0
+              {baseEntries.length > 0
                 ? topLevelPlaylists.map((e, idx) => (
                     <PlaylistRow
                       key={`p:${e.playlist.id}:${idx}`}
@@ -333,7 +330,7 @@ export function LibraryPanel({
             </ul>
           </>
         )}
-        {loaded && entries.length === 0 && (
+        {loaded && baseEntries.length === 0 && (
           <LoadMoreFooter
             loadingMore={loadingMore}
             hasMore={nextPath !== null}

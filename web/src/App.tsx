@@ -292,7 +292,9 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           openColorPicker()
           break
-        case 's':
+        case 'S':
+          // Shift+s — settings drawer. Lowercase `s` stays bound to
+          // toggleShuffle; shift+s opens the right-edge ControlPane.
           e.preventDefault()
           toggleControlPane()
           break
@@ -407,7 +409,7 @@ function ConsoleBar({
         </ConsoleButton>
         <ConsoleButton
           onClick={onToggleControls}
-          title="Settings (s)"
+          title="Settings (shift+s)"
           aria-label="Settings"
         >
           ⚙

@@ -36,17 +36,54 @@ function writeExpanded(uris: string[]): void {
   localStorage.setItem(EXPANDED_KEY, JSON.stringify(uris))
 }
 
+/** Split a flat depth-aware entries list into top-level entries (depth=0)
+ *  and a per-folder children map. The flat list libraryV3 returns has
+ *  folder rows immediately followed by their children at depth+1. */
+function indexEntries(flat: LibraryEntry[]): {
+  base: LibraryEntry[]
+  children: Record<string, LibraryEntry[]>
+} {
+  const base: LibraryEntry[] = []
+  const children: Record<string, LibraryEntry[]> = {}
+  let openFolderUri: string | null = null
+  for (const e of flat) {
+    if (e.depth === 0) {
+      base.push(e)
+      openFolderUri = e.kind === 'folder' ? e.uri : null
+      continue
+    }
+    if (openFolderUri) {
+      ;(children[openFolderUri] ??= []).push(e)
+    }
+  }
+  return { base, children }
+}
+
+function deriveAllPlaylists(
+  base: LibraryEntry[],
+  children: Record<string, LibraryEntry[]>,
+): Playlist[] {
+  const out: Playlist[] = []
+  const push = (e: LibraryEntry) => {
+    if (e.kind === 'playlist') out.push(e.playlist)
+  }
+  for (const e of base) push(e)
+  for (const arr of Object.values(children)) for (const e of arr) push(e)
+  return out
+}
+
 interface LibraryState {
-  /** Hierarchical entries from libraryV3 — playlists + folders, depth-aware.
-   *  Empty when running in PKCE-only mode (no cookie path); falls back to
-   *  flat playlists in that case. */
-  entries: LibraryEntry[]
-  /** Flat list — derived from entries (or fetched directly via the legacy
-   *  /me/playlists route in PKCE-only mode). Existing code outside the
-   *  LibraryPanel uses this. */
-  playlists: Playlist[]
-  /** Folder URIs the user has currently expanded; persists across reloads. */
+  /** Top-level entries (depth=0) from the latest fetch. The Folders /
+   *  Playlists sections in the panel render from this. */
+  baseEntries: LibraryEntry[]
+  /** Cached children for each folder, keyed by folder URI. Survives
+   *  collapse — reopening a folder pulls from here without a refetch. */
+  folderChildren: Record<string, LibraryEntry[]>
+  /** UI state: which folders are visually expanded right now. */
   expandedFolders: Set<string>
+  /** Flat list of every Playlist we've seen (top-level + inside folders).
+   *  Other code reads this; do not depend on its order. */
+  playlists: Playlist[]
   loaded: boolean
   loading: boolean
   loadingMore: boolean
@@ -62,9 +99,10 @@ interface LibraryState {
 }
 
 export const useLibrary = create<LibraryState>((set, get) => ({
-  entries: [],
-  playlists: [],
+  baseEntries: [],
+  folderChildren: {},
   expandedFolders: new Set(readExpanded()),
+  playlists: [],
   loaded: false,
   loading: false,
   loadingMore: false,
@@ -80,22 +118,24 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       const result = await fetchLibraryEntries({
         expandedFolders: Array.from(get().expandedFolders),
       })
+      const { base, children } = indexEntries(result.entries)
       set({
-        entries: result.entries,
-        playlists: derivePlaylists(result.entries),
+        baseEntries: base,
+        folderChildren: children,
+        playlists: deriveAllPlaylists(base, children),
         nextPath: result.nextPath,
         total: result.total,
         loaded: true,
         loading: false,
       })
     } catch (e) {
-      // Fall back to the legacy public-API route. Mostly hit in PKCE-only
-      // mode; in cookie mode the sidecar should always answer.
+      // Fall back to the legacy public-API route for PKCE-only mode.
       console.warn('[spotui] libraryV3 failed, falling back to /me/playlists:', e)
       try {
         const slice = await fetchPage<Playlist>(PLAYLISTS_PAGE_PATH)
         set({
-          entries: [],
+          baseEntries: [],
+          folderChildren: {},
           playlists: slice.items,
           nextPath: slice.nextPath,
           total: slice.total,
@@ -116,8 +156,8 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     if (!nextPath || loadingMore) return
     set({ loadingMore: true })
     try {
-      // The cookie path always returns the full library in one shot, so
-      // loadMore only fires in legacy fallback mode (entries are empty).
+      // Only the legacy fallback path paginates; cookie-path libraryV3
+      // returns the full library in one shot.
       const slice = await fetchPage<Playlist>(nextPath)
       set({
         playlists: [...get().playlists, ...slice.items],
@@ -136,21 +176,31 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   toggleFolder: async (uri: string) => {
     const cur = get().expandedFolders
     const next = new Set(cur)
-    if (next.has(uri)) next.delete(uri)
-    else next.add(uri)
+    const opening = !next.has(uri)
+    if (opening) next.add(uri)
+    else next.delete(uri)
     writeExpanded(Array.from(next))
     set({ expandedFolders: next })
-    // Refetch with new expansion. Reset nextPath since limits change.
+    // Closing is purely a UI toggle — keep the cached children around so
+    // reopening is instant. Opening only fetches when we don't already
+    // have this folder's children in cache.
+    if (!opening) return
+    if (get().folderChildren[uri]) return
+
     set({ loading: true })
     try {
       const result = await fetchLibraryEntries({
         expandedFolders: Array.from(next),
       })
+      const { base, children } = indexEntries(result.entries)
+      // Merge fresh children over the existing cache. baseEntries
+      // gets fully replaced because the response is the source of truth
+      // for the top-level structure.
+      const mergedChildren = { ...get().folderChildren, ...children }
       set({
-        entries: result.entries,
-        playlists: derivePlaylists(result.entries),
-        nextPath: result.nextPath,
-        total: result.total,
+        baseEntries: base,
+        folderChildren: mergedChildren,
+        playlists: deriveAllPlaylists(base, mergedChildren),
         loading: false,
       })
     } catch (e) {
@@ -161,19 +211,15 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   pin: (id) => {
     const cur = get().pinnedIds
     if (cur.includes(id)) return
-    const next = [...cur, id]
-    writePinned(next)
-    set({ pinnedIds: next })
+    const updated = [...cur, id]
+    writePinned(updated)
+    set({ pinnedIds: updated })
   },
   unpin: (id) => {
     const cur = get().pinnedIds
     if (!cur.includes(id)) return
-    const next = cur.filter((x) => x !== id)
-    writePinned(next)
-    set({ pinnedIds: next })
+    const updated = cur.filter((x) => x !== id)
+    writePinned(updated)
+    set({ pinnedIds: updated })
   },
 }))
-
-function derivePlaylists(entries: LibraryEntry[]): Playlist[] {
-  return entries.flatMap((e) => (e.kind === 'playlist' ? [e.playlist] : []))
-}

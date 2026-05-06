@@ -122,11 +122,13 @@ export function searchDesktopVariables(
 }
 
 /** Saved playlists / saved albums. Filter is `Playlists` or `Albums`.
- *  Variables match spogo's `libraryV3Variables`. */
+ *  Variables match spogo's `libraryV3Variables`. `expandedFolders` lets the
+ *  caller request the contents of named folder URIs at depth+1. */
 export function libraryV3Variables(
   filter: 'Playlists' | 'Albums',
   limit: number,
   offset: number,
+  expandedFolders: string[] = [],
 ): Record<string, unknown> {
   return {
     filters: [filter],
@@ -136,7 +138,7 @@ export function libraryV3Variables(
     limit,
     offset,
     flatten: false,
-    expandedFolders: [],
+    expandedFolders,
     folderUri: null,
     includeFoldersWhenFlattening: true,
     withCuration: false,

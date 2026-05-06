@@ -3,6 +3,7 @@ import { useLibrary } from '../store/library'
 import { useSelection } from '../store/selection'
 import { useUI } from '../store/ui'
 import type { Playlist } from '../api/spotify'
+import type { LibraryEntry } from '../api/pathfinder'
 import { playContext, type Refresh } from '../commands'
 import { LoadMoreFooter } from './LoadMoreFooter'
 
@@ -14,7 +15,9 @@ export function LibraryPanel({
   onAfterAction: Refresh
 }) {
   const {
+    entries,
     playlists,
+    expandedFolders,
     loaded,
     loading,
     loadingMore,
@@ -24,6 +27,7 @@ export function LibraryPanel({
     pinnedIds,
     load,
     loadMore,
+    toggleFolder,
     pin,
     unpin,
   } = useLibrary()
@@ -34,41 +38,48 @@ export function LibraryPanel({
   const selContextUri = useSelection((s) => s.contextUri)
   const focusedRow = useUI((s) => s.focusedRow)
   const setFocusedRow = useUI((s) => s.setFocusedRow)
-  // Library and search are mutually-exclusive "current selection" surfaces:
-  // when the user is focused on a search result, suppress the library
-  // highlight entirely. Other focus panes ('library', 'playlist', or null)
-  // leave the loaded-selection highlight visible — so clicking a track
-  // inside the open playlist doesn't make the library row appear unloaded.
   const showLibSelection = focusedRow?.pane !== 'search'
 
   function canEdit(p: Playlist): boolean {
+    // libraryV3 (cookie path) doesn't return owner.id on each row, so we
+    // treat empty owner.id as "unknown — assume editable". /me/playlists
+    // is mostly the user's own; the few followed playlists will misreport
+    // until fetchPlaylist runs on click and fills in the real owner.
+    if (!p.owner.id) return true
     return p.owner.id === ownerId || p.collaborative
   }
 
-  // Show every playlist the user has in their library — the editable ones
-  // and the read-only followed/curated ones. Non-editable rows render in the
-  // external color so it's obvious they don't accept `a` (add-to-playlist).
-  // Pinned ones are pulled out and rendered above the divider, in the user's
-  // pin order.
-  const { pinnedPlaylists, regularPlaylists } = useMemo(() => {
+  // Pinning operates on flat playlists — we pull pinned ones to the top
+  // regardless of folder placement. Non-pinned ones render as the
+  // hierarchical entries list below the pin divider.
+  const pinnedPlaylists = useMemo(() => {
     const pinnedSet = new Set(pinnedIds)
-    const pinned: Playlist[] = []
-    const regular: Playlist[] = []
-    for (const p of playlists) {
-      if (pinnedSet.has(p.id)) pinned.push(p)
-      else regular.push(p)
-    }
-    pinned.sort((a, b) => pinnedIds.indexOf(a.id) - pinnedIds.indexOf(b.id))
-    return { pinnedPlaylists: pinned, regularPlaylists: regular }
+    const pinned = playlists.filter((p) => pinnedSet.has(p.id))
+    pinned.sort(
+      (a, b) => pinnedIds.indexOf(a.id) - pinnedIds.indexOf(b.id),
+    )
+    return pinned
   }, [playlists, pinnedIds])
+
+  // Skip pinned entries from the hierarchical list — they're shown above.
+  const regularEntries = useMemo(() => {
+    const pinnedSet = new Set(pinnedIds)
+    return entries.filter(
+      (e) => e.kind !== 'playlist' || !pinnedSet.has(e.playlist.id),
+    )
+  }, [entries, pinnedIds])
+
+  // Fallback flat list for PKCE-only mode (entries empty).
+  const regularPlaylistsFlat = useMemo(() => {
+    if (entries.length > 0) return [] // entries-mode renders via regularEntries
+    const pinnedSet = new Set(pinnedIds)
+    return playlists.filter((p) => !pinnedSet.has(p.id))
+  }, [entries, playlists, pinnedIds])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  // Background lives on the <li> so the active stripe paints flush to the
-  // right edge (across the pin slot, even when ☆ is hidden). Inner buttons
-  // contribute only text color and padding.
   const liClass = (active: boolean) =>
     'flex items-center group ' +
     (active
@@ -84,23 +95,28 @@ export function LibraryPanel({
     return `flex-1 text-left px-4 py-2 text-sm truncate ${color}`
   }
 
-  function PlaylistRow({ pl, pinned }: { pl: Playlist; pinned: boolean }) {
+  function PlaylistRow({
+    pl,
+    pinned,
+    depth = 0,
+  }: {
+    pl: Playlist
+    pinned: boolean
+    depth?: number
+  }) {
     const active =
       showLibSelection && selKind === 'playlist' && selContextUri === pl.uri
     const editable = canEdit(pl)
     return (
       <li className={liClass(active)}>
         <button
-          // Single-click selects the playlist and loads it into the pane;
-          // double-click starts playback in the playlist's context. Setting
-          // focusedRow here makes Enter target this row and clears any stale
-          // focus from a prior search interaction.
           onClick={() => {
             setFocusedRow({ pane: 'library', uri: pl.uri, isTrack: false })
             void selectPlaylist(pl, editable)
           }}
           onDoubleClick={() => void playContext(pl.uri, onAfterAction)}
           className={titleClass(active, !editable)}
+          style={depth > 0 ? { paddingLeft: `${depth * 12 + 16}px` } : undefined}
           title={
             editable
               ? `${pl.name} — double-click to play`
@@ -122,6 +138,66 @@ export function LibraryPanel({
           {pinned ? '★' : '☆'}
         </button>
       </li>
+    )
+  }
+
+  function FolderRow({
+    uri,
+    name,
+    depth,
+    playlistCount,
+    folderCount,
+  }: {
+    uri: string
+    name: string
+    depth: number
+    playlistCount: number
+    folderCount: number
+  }) {
+    const expanded = expandedFolders.has(uri)
+    const childTotal = playlistCount + folderCount
+    return (
+      <li className={liClass(false)}>
+        <button
+          onClick={() => void toggleFolder(uri)}
+          className="flex-1 text-left px-4 py-2 text-sm truncate flex items-center gap-1 text-neutral-700 dark:text-neutral-300"
+          style={depth > 0 ? { paddingLeft: `${depth * 12 + 16}px` } : undefined}
+          title={`${name} — ${childTotal} item${childTotal === 1 ? '' : 's'}`}
+        >
+          <span className="inline-block w-3 text-neutral-500 text-xs">
+            {expanded ? '▾' : '▸'}
+          </span>
+          <span className="truncate flex-1">{name}</span>
+          {childTotal > 0 && (
+            <span className="text-[10px] text-neutral-500 ml-1">
+              {childTotal}
+            </span>
+          )}
+        </button>
+      </li>
+    )
+  }
+
+  function renderEntry(e: LibraryEntry, idx: number) {
+    if (e.kind === 'folder') {
+      return (
+        <FolderRow
+          key={`f:${e.uri}:${idx}`}
+          uri={e.uri}
+          name={e.name}
+          depth={e.depth}
+          playlistCount={e.playlistCount}
+          folderCount={e.folderCount}
+        />
+      )
+    }
+    return (
+      <PlaylistRow
+        key={`p:${e.playlist.id}:${idx}`}
+        pl={e.playlist}
+        pinned={false}
+        depth={e.depth}
+      />
     )
   }
 
@@ -157,23 +233,35 @@ export function LibraryPanel({
             </button>
           </li>
           {pinnedPlaylists.map((pl) => (
-            <PlaylistRow key={pl.id} pl={pl} pinned />
+            <PlaylistRow key={`pin:${pl.id}`} pl={pl} pinned />
           ))}
         </ul>
         <div className="border-t border-neutral-200 dark:border-neutral-800 my-2" />
         {loading && (
-          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">Loading playlists…</p>
+          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">
+            Loading playlists…
+          </p>
         )}
-        {error && <p className="px-4 py-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
-        {loaded && regularPlaylists.length === 0 && pinnedPlaylists.length === 0 && !error && (
-          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">No playlists.</p>
+        {error && (
+          <p className="px-4 py-2 text-sm text-red-600 dark:text-red-400">{error}</p>
         )}
+        {loaded &&
+          regularEntries.length === 0 &&
+          regularPlaylistsFlat.length === 0 &&
+          pinnedPlaylists.length === 0 &&
+          !error && (
+            <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">
+              No playlists.
+            </p>
+          )}
         <ul>
-          {regularPlaylists.map((pl) => (
-            <PlaylistRow key={pl.id} pl={pl} pinned={false} />
-          ))}
+          {entries.length > 0
+            ? regularEntries.map((e, idx) => renderEntry(e, idx))
+            : regularPlaylistsFlat.map((pl) => (
+                <PlaylistRow key={pl.id} pl={pl} pinned={false} />
+              ))}
         </ul>
-        {loaded && (
+        {loaded && entries.length === 0 && (
           <LoadMoreFooter
             loadingMore={loadingMore}
             hasMore={nextPath !== null}

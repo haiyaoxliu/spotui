@@ -94,21 +94,27 @@ export async function searchHandler(
   }
 }
 
-/** GET /api/proxy/library/playlists?limit=…&offset=…
+/** GET /api/proxy/library/playlists?limit=…&offset=…&expanded=uri1,uri2
  *  GET /api/proxy/library/albums?limit=…&offset=…
- *  Wraps libraryV3 with the filter set. */
+ *  Wraps libraryV3 with the filter set. The `expanded` query param is a
+ *  comma-separated list of folder URIs Spotify should expand inline; the
+ *  response includes those folders' children at depth+1. */
 function libraryHandler(filter: 'Playlists' | 'Albums') {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://_')
     const limit = clampInt(url.searchParams.get('limit'), 50, 1, 200)
     const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
+    const expanded = (url.searchParams.get('expanded') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s.startsWith('spotify:'))
     const read = await loadCookies()
     if (!read) return error(res, 401, 'no cookies')
     try {
       const payload = await pathfinderQuery(
         read,
         'libraryV3',
-        libraryV3Variables(filter, limit, offset),
+        libraryV3Variables(filter, limit, offset, expanded),
       )
       json(res, 200, payload)
     } catch (e) {

@@ -66,7 +66,10 @@ interface PfTrack {
   id?: string
   uri?: string
   name?: string
+  // search & library responses use `duration`; fetchPlaylist responses
+  // use `trackDuration` for the same field. We accept either.
   duration?: { totalMilliseconds?: number }
+  trackDuration?: { totalMilliseconds?: number }
   artists?: PfArtistsContainer
   albumOfTrack?: {
     id?: string
@@ -271,11 +274,15 @@ function mapTrack(t: PfTrack): Track | null {
   if (!t.uri || !t.name) return null
   const id = t.id ?? idFromUri(t.uri)
   const album = t.albumOfTrack
+  const durationMs =
+    t.duration?.totalMilliseconds ??
+    t.trackDuration?.totalMilliseconds ??
+    0
   return {
     id,
     name: t.name,
     uri: t.uri,
-    duration_ms: t.duration?.totalMilliseconds ?? 0,
+    duration_ms: durationMs,
     artists: mapArtistsContainer(t.artists),
     album: {
       id: album?.id ?? idFromUri(album?.uri ?? ''),
@@ -439,6 +446,7 @@ interface LibraryV3Page {
 interface LibraryV3Item {
   addedAt?: { isoString?: string }
   pinned?: boolean
+  depth?: number
   item?: {
     _uri?: string
     data?: LibraryV3ItemData
@@ -446,52 +454,126 @@ interface LibraryV3Item {
 }
 
 interface LibraryV3ItemData {
-  __typename?: string // 'Playlist' | 'PseudoPlaylist' | 'Album'
+  __typename?: string // 'Playlist' | 'PseudoPlaylist' | 'Album' | 'Folder'
   uri?: string
   name?: string
   count?: number
   image?: {
     sources?: PfImageSource[]
   } | null
+  // Folder-only fields:
+  playlistCount?: number
+  folderCount?: number
+}
+
+/** Discriminated union covering everything libraryV3 can hand back when
+ *  filter=Playlists. The library panel uses this to render the folder
+ *  hierarchy; `playlists`-only consumers (legacy fetchPage callers) get
+ *  a filtered Playlist[] view. */
+export type LibraryEntry =
+  | {
+      kind: 'playlist'
+      depth: number
+      pinned: boolean
+      playlist: Playlist
+    }
+  | {
+      kind: 'folder'
+      depth: number
+      uri: string
+      name: string
+      playlistCount: number
+      folderCount: number
+    }
+
+export interface LibraryEntriesResult {
+  entries: LibraryEntry[]
+  total: number
+  nextPath: string | null
+}
+
+/** Folder-aware library fetcher. Pass currently-expanded folder URIs and
+ *  Spotify will inline their children at depth+1. Used by the library
+ *  store; the legacy fetchPage(/me/playlists) interceptor below still
+ *  works for code that just wants Playlist[]. */
+export async function fetchLibraryEntries(opts: {
+  limit?: number
+  offset?: number
+  expandedFolders?: string[]
+} = {}): Promise<LibraryEntriesResult> {
+  const limit = opts.limit ?? 200
+  const offset = opts.offset ?? 0
+  const expanded = opts.expandedFolders ?? []
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  if (expanded.length > 0) params.set('expanded', expanded.join(','))
+  const res = await fetch(`/api/proxy/library/playlists?${params}`)
+  if (!res.ok) throw new Error(`library playlists ${res.status}`)
+  const env = (await res.json()) as { data?: { me?: { libraryV3?: LibraryV3Page } } }
+  const page = env.data?.me?.libraryV3
+  const entries = (page?.items ?? []).flatMap((it) => {
+    const mapped = mapLibraryEntry(it)
+    return mapped ? [mapped] : []
+  })
+  const total = page?.totalCount ?? entries.length
+  return {
+    entries,
+    total,
+    nextPath: nextPath('/me/playlists', entries.length, offset, total, limit),
+  }
 }
 
 async function libraryPlaylistsViaPathfinder(
   limit: number,
   offset: number,
 ): Promise<PageSlice<Playlist>> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-  const res = await fetch(`/api/proxy/library/playlists?${params}`)
-  if (!res.ok) throw new Error(`library playlists ${res.status}`)
-  const env = (await res.json()) as { data?: { me?: { libraryV3?: LibraryV3Page } } }
-  const page = env.data?.me?.libraryV3
-  const items = (page?.items ?? []).flatMap((it) => {
-    const mapped = mapLibraryPlaylist(it)
-    return mapped ? [mapped] : []
-  })
-  const total = page?.totalCount ?? items.length
-  return {
-    items,
-    nextPath: nextPath('/me/playlists', items.length, offset, total, limit),
-    total,
-  }
+  const result = await fetchLibraryEntries({ limit, offset })
+  const items = result.entries.flatMap((e) =>
+    e.kind === 'playlist' ? [e.playlist] : [],
+  )
+  return { items, nextPath: result.nextPath, total: result.total }
 }
 
-function mapLibraryPlaylist(it: LibraryV3Item): Playlist | null {
+function mapLibraryEntry(it: LibraryV3Item): LibraryEntry | null {
   const data = it.item?.data
-  if (!data?.uri || !data.name) return null
-  // Filter out PseudoPlaylist (Liked Songs sentinel — handled separately
-  // via /me/tracks). Keeps the result shape congruent with the public API.
+  if (!data) return null
+  // Skip PseudoPlaylist (Liked Songs) — it's rendered as a hardcoded
+  // sidebar entry that calls selectLiked() instead of going through the
+  // playlist-row path.
   if (data.__typename === 'PseudoPlaylist') return null
+  const depth = typeof it.depth === 'number' ? it.depth : 0
+  if (data.__typename === 'Folder') {
+    if (!data.uri || !data.name) return null
+    return {
+      kind: 'folder',
+      depth,
+      uri: data.uri,
+      name: data.name,
+      playlistCount: data.playlistCount ?? 0,
+      folderCount: data.folderCount ?? 0,
+    }
+  }
+  if (!data.uri || !data.name) return null
   return {
-    id: idFromUri(data.uri),
-    name: data.name,
-    uri: data.uri,
-    description: null,
-    items: { total: data.count ?? 0, href: '' },
-    images: mapImages(data.image?.sources),
-    owner: { id: '' },
-    collaborative: false,
-    public: null,
+    kind: 'playlist',
+    depth,
+    pinned: !!it.pinned,
+    playlist: {
+      id: idFromUri(data.uri),
+      name: data.name,
+      uri: data.uri,
+      description: null,
+      items: { total: data.count ?? 0, href: '' },
+      images: mapImages(data.image?.sources),
+      // libraryV3 doesn't expose owner; LibraryPanel.canEdit treats empty
+      // owner.id as "unknown — assume editable". The real owner gets
+      // filled in lazily when fetchPlaylist runs on click.
+      owner: { id: '' },
+      collaborative: false,
+      public: null,
+    },
   }
 }
 

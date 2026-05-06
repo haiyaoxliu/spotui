@@ -64,7 +64,6 @@ export function LyricsPanel() {
     return lo - 1
   }, [lyrics, localPos])
 
-  const containerRef = useRef<HTMLDivElement | null>(null)
   const activeRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (activeRef.current) {
@@ -88,7 +87,6 @@ export function LyricsPanel() {
 
   return (
     <div
-      ref={containerRef}
       className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 overflow-y-auto max-h-64 text-sm leading-relaxed"
     >
       {lyrics.lines.map((line, i) => {

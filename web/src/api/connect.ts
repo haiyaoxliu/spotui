@@ -8,6 +8,8 @@
  *   `await tryConnect(() => connectPlay({uri}), () => publicPlayApi(...))`.
  */
 
+import { truncate } from '../util/truncate'
+
 interface PostJsonOptions {
   path: string
   body?: Record<string, unknown>
@@ -73,7 +75,3 @@ export const connectQueueAdd = (uri: string): Promise<void> =>
 
 export const connectTransfer = (deviceId: string, play = false): Promise<void> =>
   postJson({ path: '/transfer', body: { deviceId, play } })
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
-}

@@ -9,6 +9,8 @@
  * the album, the artist, and the playing context (playlist/album).
  */
 
+import { truncate } from '../util/truncate'
+
 export interface FriendUser {
   uri: string
   name: string
@@ -49,8 +51,4 @@ export async function fetchFriendActivity(): Promise<FriendActivity[]> {
   }
   const payload = (await res.json()) as RawResponse
   return payload.friends ?? []
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }

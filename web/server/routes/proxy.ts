@@ -5,9 +5,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { discoverCookies, type CookieReadResult } from '../cookies/index.js'
-import { hasSpDc } from '../cookies/types.js'
-import { readFileCookies } from '../cookies/file.js'
+import { loadCookies, type CookieReadResult } from '../cookies/index.js'
 import { fetchBuddylist } from '../spotify/buddylist.js'
 import { connectClient } from '../spotify/connect.js'
 import { getDealer, type DealerEvent } from '../spotify/dealer.js'
@@ -26,6 +24,14 @@ import {
   searchDesktopVariables,
 } from '../spotify/pathfinder.js'
 import { fetchClusterSnapshot, fetchRawCluster } from '../spotify/state.js'
+import {
+  clampInt,
+  errMsg,
+  error,
+  json,
+  noContent,
+  readJson,
+} from './_http.js'
 
 interface PathfinderBody {
   operation?: unknown
@@ -104,36 +110,33 @@ export async function searchHandler(
 }
 
 /** GET /api/proxy/library/playlists?limit=…&offset=…&expanded=uri1,uri2
- *  GET /api/proxy/library/albums?limit=…&offset=…
- *  Wraps libraryV3 with the filter set. The `expanded` query param is a
- *  comma-separated list of folder URIs Spotify should expand inline; the
- *  response includes those folders' children at depth+1. */
-function libraryHandler(filter: 'Playlists' | 'Albums') {
-  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const url = new URL(req.url ?? '/', 'http://_')
-    const limit = clampInt(url.searchParams.get('limit'), 50, 1, 200)
-    const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
-    const expanded = (url.searchParams.get('expanded') ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0 && s.startsWith('spotify:'))
-    const read = await loadCookies()
-    if (!read) return error(res, 401, 'no cookies')
-    try {
-      const payload = await pathfinderQuery(
-        read,
-        'libraryV3',
-        libraryV3Variables(filter, limit, offset, expanded),
-      )
-      json(res, 200, payload)
-    } catch (e) {
-      error(res, 502, errMsg(e))
-    }
+ *  Wraps libraryV3 with `filter: ['Playlists']`. The `expanded` query
+ *  param is a comma-separated list of folder URIs Spotify should expand
+ *  inline; the response includes those folders' children at depth+1. */
+export async function libraryPlaylistsHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://_')
+  const limit = clampInt(url.searchParams.get('limit'), 50, 1, 200)
+  const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
+  const expanded = (url.searchParams.get('expanded') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s.startsWith('spotify:'))
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await pathfinderQuery(
+      read,
+      'libraryV3',
+      libraryV3Variables('Playlists', limit, offset, expanded),
+    )
+    json(res, 200, payload)
+  } catch (e) {
+    error(res, 502, errMsg(e))
   }
 }
-
-export const libraryPlaylistsHandler = libraryHandler('Playlists')
-export const libraryAlbumsHandler = libraryHandler('Albums')
 
 /** GET /api/proxy/library/tracks?limit=…&offset=…
  *  Liked Songs via fetchLibraryTracks. */
@@ -542,56 +545,3 @@ export async function stateStreamHandler(
   req.on('error', cleanup)
 }
 
-// ---- helpers -----------------------------------------------------------
-
-async function loadCookies(): Promise<CookieReadResult | null> {
-  const persisted = await readFileCookies()
-  if (hasSpDc(persisted)) return { cookies: persisted, source: 'file' }
-  const { found } = await discoverCookies()
-  return found
-}
-
-function clampInt(
-  raw: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  if (typeof raw !== 'string') return fallback
-  const n = Number.parseInt(raw, 10)
-  if (!Number.isFinite(n)) return fallback
-  return Math.max(min, Math.min(max, n))
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status
-  res.setHeader('Content-Type', 'application/json')
-  res.end(JSON.stringify(body))
-}
-
-function noContent(res: ServerResponse): void {
-  res.statusCode = 204
-  res.end()
-}
-
-function error(res: ServerResponse, status: number, message: string): void {
-  json(res, status, { error: message })
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  let total = 0
-  for await (const chunk of req) {
-    const buf = chunk as Buffer
-    chunks.push(buf)
-    total += buf.length
-    if (total > 1_000_000) throw new Error('request body too large')
-  }
-  const raw = Buffer.concat(chunks).toString('utf8')
-  if (raw.length === 0) return {}
-  return JSON.parse(raw)
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}

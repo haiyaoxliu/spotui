@@ -14,12 +14,12 @@
  */
 
 import type { CookieReadResult } from '../cookies/index.js'
+import { truncate } from '../util/truncate.js'
 import { resolveHash } from './hash.js'
+import { webPlayerHeaders } from './headers.js'
 import { getSessionAuth, type SessionAuth } from './session.js'
 
 const PATHFINDER_URL = 'https://api-partner.spotify.com/pathfinder/v1/query'
-const SEC_CH_UA =
-  '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"'
 
 export interface PathfinderResponse {
   data?: unknown
@@ -52,7 +52,7 @@ export async function pathfinderQuery(
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new Error(`pathfinder ${operation} ${res.status}: ${truncate(body)}`)
+    throw new Error(`pathfinder ${operation} ${res.status}: ${truncate(body, 400)}`)
   }
   const payload = (await res.json()) as PathfinderResponse
   if (payload.errors && payload.errors.length > 0) {
@@ -81,25 +81,9 @@ function buildUrl(
 
 function pathfinderHeaders(auth: SessionAuth): Record<string, string> {
   return {
-    Accept: 'application/json',
-    Authorization: `Bearer ${auth.accessToken}`,
-    'client-token': auth.clientToken,
-    'app-platform': 'WebPlayer',
-    'spotify-app-version': auth.clientVersion,
+    ...webPlayerHeaders(auth, { fetchSite: 'same-site' }),
     'Accept-Language': 'en',
-    Origin: 'https://open.spotify.com',
-    Referer: 'https://open.spotify.com/',
-    'Sec-Fetch-Site': 'same-site',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-CH-UA': SEC_CH_UA,
-    'Sec-CH-UA-Platform': '"macOS"',
-    'Sec-CH-UA-Mobile': '?0',
   }
-}
-
-function truncate(s: string): string {
-  return s.length > 400 ? `${s.slice(0, 400)}...` : s
 }
 
 // ---- variable builders for the operations we use ----------------------

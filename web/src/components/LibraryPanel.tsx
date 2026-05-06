@@ -5,6 +5,7 @@ import { useUI } from '../store/ui'
 import type { Playlist } from '../api/spotify'
 import type { LibraryEntry } from '../api/pathfinder'
 import { playContext, type Refresh } from '../commands'
+import { canEditPlaylist } from '../util/canEdit'
 import { LoadMoreFooter } from './LoadMoreFooter'
 
 export function LibraryPanel({
@@ -41,14 +42,7 @@ export function LibraryPanel({
   const setFocusedRow = useUI((s) => s.setFocusedRow)
   const showLibSelection = focusedRow?.pane !== 'search'
 
-  function canEdit(p: Playlist): boolean {
-    // libraryV3 (cookie path) doesn't return owner.id on each row, so we
-    // treat empty owner.id as "unknown — assume editable". /me/playlists
-    // is mostly the user's own; the few followed playlists will misreport
-    // until fetchPlaylist runs on click and fills in the real owner.
-    if (!p.owner.id) return true
-    return p.owner.id === ownerId || p.collaborative
-  }
+  const canEdit = (p: Playlist): boolean => canEditPlaylist(p, ownerId)
 
   // Pinning operates on flat playlists — we pull pinned ones to the top
   // regardless of folder placement.

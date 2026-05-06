@@ -26,6 +26,9 @@ import path from 'node:path'
 
 import type { CookieReadResult } from '../cookies/index.js'
 import { toCookieHeader } from '../cookies/types.js'
+import { isNotFound } from '../util/fs.js'
+import { truncate } from '../util/truncate.js'
+import { USER_AGENT } from './headers.js'
 import { getToken } from './token.js'
 
 const ME_URL = 'https://api.spotify.com/v1/me'
@@ -150,8 +153,7 @@ async function fetchFromWww(read: CookieReadResult): Promise<MeProfile> {
     headers: {
       Accept: 'application/json',
       Cookie: toCookieHeader(read.cookies),
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'User-Agent': USER_AGENT,
     },
   })
   if (!res.ok) {
@@ -196,17 +198,4 @@ async function writeDisk(profile: MeProfile): Promise<void> {
     { mode: 0o600 },
   )
   await fs.rename(tmp, ME_FILE)
-}
-
-function isNotFound(e: unknown): boolean {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    (e as { code: unknown }).code === 'ENOENT'
-  )
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }

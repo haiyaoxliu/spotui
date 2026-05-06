@@ -1,8 +1,6 @@
 import { create } from 'zustand'
 import { search, searchMore, type SearchResults, type SearchTab } from '../api/spotify'
 
-const TABS: SearchTab[] = ['tracks', 'albums', 'artists', 'playlists']
-
 type LoadingMap = Record<SearchTab, boolean>
 const NO_LOADING: LoadingMap = {
   tracks: false,
@@ -102,7 +100,3 @@ export const useSearch = create<SearchState>((set, get) => ({
     }
   },
 }))
-
-// Keep the helper around so the type usage above is valid even if no other
-// caller imports TABS today.
-export { TABS as SEARCH_TABS }

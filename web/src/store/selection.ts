@@ -114,7 +114,7 @@ export const useSelection = create<SelectionState>((set, get) => {
   // next selectXxx entry.
   let restoring = false
 
-  function maybeCaptureprior(): PriorSelection | null {
+  function maybeCapturePrior(): PriorSelection | null {
     if (restoring) return get().prior
     return snapshotOf(get())
   }
@@ -139,7 +139,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     prior: null,
 
     selectPlaylist: async (p, canEdit) => {
-      const prior = maybeCaptureprior()
+      const prior = maybeCapturePrior()
       // If we have a fresh cache hit for this playlist, render it
       // immediately and skip the network entirely. This makes
       // playlist-A → playlist-B → playlist-A feel instant.
@@ -210,7 +210,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     },
 
     selectAlbum: async (a) => {
-      const prior = maybeCaptureprior()
+      const prior = maybeCapturePrior()
       const artistsLabel = a.artists.map((x) => x.name).join(', ')
       set({
         kind: 'album',
@@ -246,7 +246,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     },
 
     selectLiked: async () => {
-      const prior = maybeCaptureprior()
+      const prior = maybeCapturePrior()
       set({
         kind: 'liked',
         contextUri: null,
@@ -283,7 +283,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     },
 
     selectRecent: async () => {
-      const prior = maybeCaptureprior()
+      const prior = maybeCapturePrior()
       set({
         kind: 'recent',
         contextUri: null,

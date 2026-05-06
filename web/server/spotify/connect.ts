@@ -23,15 +23,16 @@
  */
 
 import crypto from 'node:crypto'
-import os from 'node:os'
 
 import WebSocket from 'ws'
 
 import type { CookieReadResult } from '../cookies/index.js'
+import { runtimeOs } from '../util/runtime.js'
+import { truncate } from '../util/truncate.js'
 import { getDealer } from './dealer.js'
+import { USER_AGENT, webPlayerHeaders } from './headers.js'
 import { getSessionAuth, type SessionAuth } from './session.js'
 import { getToken } from './token.js'
-import { toCookieHeader } from '../cookies/types.js'
 
 const CONNECT_STATE_BASE =
   'https://gue1-spclient.spotify.com/connect-state/v1'
@@ -39,9 +40,6 @@ const TRACK_PLAYBACK_BASE =
   'https://gue1-spclient.spotify.com/track-playback/v1'
 const DEALER_URL = 'wss://dealer.spotify.com/'
 const REGISTRATION_TTL_MS = 10 * 60 * 1000
-const APP_PLATFORM = 'WebPlayer'
-const SEC_CH_UA =
-  '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"'
 
 interface ConnectSession {
   deviceId: string
@@ -125,7 +123,7 @@ export const connectClient: ConnectClient = {
 async function state(read: CookieReadResult): Promise<ConnectStateResponse> {
   const auth = await getSessionAuth(read)
   const connectionId = await ensureConnectionId(read)
-  await ensureRegistered(read, auth, connectionId)
+  await ensureRegistered(auth, connectionId)
   const url = `${CONNECT_STATE_BASE}/devices/hobs_${session.deviceId}`
   const body = {
     member_type: 'CONNECT_STATE',
@@ -180,10 +178,7 @@ async function getConnectionIdOnce(read: CookieReadResult): Promise<string> {
   const url = `${DEALER_URL}?access_token=${encodeURIComponent(tok.accessToken)}`
   return new Promise<string>((resolve, reject) => {
     const ws = new WebSocket(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-      },
+      headers: { 'User-Agent': USER_AGENT },
     })
     const timer = setTimeout(() => {
       ws.close()
@@ -215,7 +210,6 @@ async function getConnectionIdOnce(read: CookieReadResult): Promise<string> {
 }
 
 async function ensureRegistered(
-  read: CookieReadResult,
   auth: SessionAuth,
   connectionId: string,
 ): Promise<void> {
@@ -267,11 +261,6 @@ async function ensureRegistered(
     throw new Error(`register device ${res.status}: ${truncate(text)}`)
   }
   session.registeredAt = Date.now()
-
-  // Adding cookie attachment to track-playback registration:
-  // some Spotify infra checks the cookie on registration. We attach
-  // implicitly via the bearer + client-token; raw cookie isn't required.
-  void read
 }
 
 // ---- command sender ----------------------------------------------------
@@ -454,43 +443,12 @@ function connectHeaders(
   connectionId: string,
   withContentType = false,
 ): Record<string, string> {
-  const h: Record<string, string> = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${auth.accessToken}`,
-    'client-token': auth.clientToken,
-    'app-platform': APP_PLATFORM,
-    'spotify-app-version': auth.clientVersion,
-    'X-Spotify-Connection-Id': connectionId,
-    Origin: 'https://open.spotify.com',
-    Referer: 'https://open.spotify.com/',
-    'Sec-CH-UA': SEC_CH_UA,
-    'Sec-CH-UA-Mobile': '?0',
-    'Sec-CH-UA-Platform': '"macOS"',
-  }
-  if (withContentType) h['Content-Type'] = 'application/json'
-  return h
+  return webPlayerHeaders(auth, {
+    connectionId,
+    json: withContentType,
+  })
 }
 
 function randomHex(size: number): string {
   return crypto.randomBytes(Math.ceil(size / 2)).toString('hex').slice(0, size)
 }
-
-function runtimeOs(): { osName: string; osVersion: string } {
-  switch (os.platform()) {
-    case 'darwin':
-      return { osName: 'macos', osVersion: 'unknown' }
-    case 'win32':
-      return { osName: 'windows', osVersion: 'unknown' }
-    default:
-      return { osName: 'linux', osVersion: 'unknown' }
-  }
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
-}
-
-// Cookie-based session is implicit via the bearer; this function is here
-// in case we later need raw cookie attachment (e.g. for endpoints that
-// double-check the jar). Leaving the import path intact.
-export { toCookieHeader as _cookieHeaderForConnect }

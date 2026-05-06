@@ -13,13 +13,13 @@
 
 import type { CookieReadResult } from '../cookies/index.js'
 import { toCookieHeader } from '../cookies/types.js'
+import { truncate } from '../util/truncate.js'
 
+import { APP_PLATFORM, SEC_CH_UA } from './headers.js'
 import { generateTotp } from './totp.js'
 
 const TOKEN_URL = 'https://open.spotify.com/api/token'
 const REFRESH_SLACK_MS = 60_000
-const SEC_CH_UA =
-  '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"'
 
 export interface WebToken {
   accessToken: string
@@ -73,7 +73,7 @@ async function mintToken(read: CookieReadResult): Promise<WebToken> {
       Cookie: cookieHeader,
       Accept: 'application/json',
       'Accept-Language': 'en-US,en;q=0.9',
-      'App-Platform': 'WebPlayer',
+      'App-Platform': APP_PLATFORM,
       Origin: 'https://open.spotify.com',
       Referer: 'https://open.spotify.com/',
       'Sec-Fetch-Site': 'same-origin',
@@ -105,8 +105,4 @@ async function mintToken(read: CookieReadResult): Promise<WebToken> {
     isAnonymous: !!payload.isAnonymous,
     clientId: payload.clientId ?? '',
   }
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }

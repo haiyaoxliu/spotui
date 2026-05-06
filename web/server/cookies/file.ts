@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { isNotFound } from '../util/fs.js'
 import type { SpotifyCookie } from './types.js'
 import { hasSpDc } from './types.js'
 
@@ -72,13 +73,4 @@ export async function clearFileCookies(
     if (isNotFound(e)) return
     throw e
   }
-}
-
-function isNotFound(e: unknown): boolean {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    (e as { code: unknown }).code === 'ENOENT'
-  )
 }

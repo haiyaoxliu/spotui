@@ -36,7 +36,6 @@ import {
   jamGetHandler,
   jamLeaveHandler,
   jamStartHandler,
-  libraryAlbumsHandler,
   libraryPlaylistsHandler,
   libraryTracksHandler,
   lyricsHandler,
@@ -67,7 +66,6 @@ const ROUTES: Route[] = [
   { path: '/api/proxy/pathfinder', method: 'POST', handler: pathfinderHandler },
   { path: '/api/proxy/search', method: 'GET', handler: searchHandler },
   { path: '/api/proxy/library/playlists', method: 'GET', handler: libraryPlaylistsHandler },
-  { path: '/api/proxy/library/albums', method: 'GET', handler: libraryAlbumsHandler },
   { path: '/api/proxy/library/tracks', method: 'GET', handler: libraryTracksHandler },
   { path: '/api/proxy/playlist', method: 'GET', handler: playlistTracksHandler },
   // /state/stream and /state/raw MUST come before /state — Connect's
@@ -135,11 +133,9 @@ export function spotuiSidecar(): Plugin {
         res.end(JSON.stringify({ ok: true, name: 'spotui-sidecar' }))
       })
 
+      const summary = ROUTES.map((r) => `${r.method} ${r.path}`).join(', ')
       console.log(
-        '[spotui] sidecar mounted: ' +
-          '/api/auth/{status,discover,paste,clear,token} + ' +
-          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items,state/stream,lyrics/:id,connect/{play,pause,next,prev,seek,volume,shuffle,repeat,queue,transfer},friends,jam,jam/{start,leave}} + ' +
-          '/api/health',
+        `[spotui] sidecar mounted: ${summary}, GET /api/health`,
       )
     },
   }

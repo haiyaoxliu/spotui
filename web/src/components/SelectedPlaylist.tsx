@@ -10,6 +10,7 @@ import {
   type Track,
 } from '../api/spotify'
 import { playContext, type Refresh } from '../commands'
+import { canEditPlaylist } from '../util/canEdit'
 import { LoadMoreFooter } from './LoadMoreFooter'
 
 type Tab = 'tracks' | 'albums' | 'artists' | 'playlists'
@@ -350,7 +351,7 @@ export function SelectedPlaylist({
                 items={sPlaylists}
                 searchType="playlist"
                 render={(p: Playlist) => {
-                  const canEdit = p.owner.id === ownerId || p.collaborative
+                  const canEdit = canEditPlaylist(p, ownerId)
                   return {
                     key: p.id,
                     uri: p.uri,

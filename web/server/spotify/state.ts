@@ -19,6 +19,7 @@
  */
 
 import type { CookieReadResult } from '../cookies/index.js'
+import { idFromUri, typeFromUri } from '../util/uri.js'
 
 import { connectClient } from './connect.js'
 
@@ -93,14 +94,10 @@ interface Queue {
   currently_playing: PlayingItem | null
   /** Public-Web-API contract: a flat list of upcoming items. Cookie-mode
    *  preserves the same shape but each item carries a `_provider` tag so
-   *  the UI can section "Queue" (user-added) from "Up next" (autoplay /
-   *  context continuation). The /v1/me/player/queue path leaves
-   *  `_provider` undefined, since the public API doesn't expose it. */
+   *  the UI can filter user-added entries from autoplay/context
+   *  continuation. The /v1/me/player/queue path leaves `_provider`
+   *  undefined, since the public API doesn't expose it. */
   queue: PlayingItem[]
-  /** Cookie-mode only: the URI of the context driving autoplay
-   *  continuation, when one is known. Lets the UI label "Next from
-   *  {context}" without poking the player_state separately. */
-  autoplay_context_uri?: string
 }
 
 interface RawCluster {
@@ -251,24 +248,9 @@ function mapQueue(cluster: RawCluster): Queue {
     if (t.provider) m._provider = t.provider
     return [m]
   })
-  // Best-effort autoplay context: the first autoplay entry's metadata
-  // carries `context_uri` pointing to whatever is driving recommendations
-  // ("station", album, etc.). Pass it through so the UI can label the
-  // section without re-fetching anything.
-  let autoplayContext: string | undefined
-  for (const t of rawNext) {
-    if (t.provider === 'autoplay') {
-      const ctx = t.metadata?.context_uri
-      if (typeof ctx === 'string' && ctx.length > 0) {
-        autoplayContext = ctx
-        break
-      }
-    }
-  }
   return {
     currently_playing: mapTrack(player.track),
     queue: next,
-    autoplay_context_uri: autoplayContext,
   }
 }
 
@@ -499,12 +481,3 @@ function parseIntStr(v: unknown, fallback: number): number {
   return fallback
 }
 
-function idFromUri(uri: string): string {
-  const parts = uri.split(':')
-  return parts[parts.length - 1] ?? ''
-}
-
-function typeFromUri(uri: string): string {
-  const parts = uri.split(':')
-  return parts.length >= 3 ? (parts[parts.length - 2] ?? '') : ''
-}

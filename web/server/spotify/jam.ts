@@ -14,29 +14,11 @@
  */
 
 import type { CookieReadResult } from '../cookies/index.js'
+import { truncate } from '../util/truncate.js'
+import { webPlayerHeaders } from './headers.js'
 import { getSessionAuth } from './session.js'
 
 const JAM_BASE = 'https://gae2-spclient.spotify.com/social-connect/v2/sessions'
-const SEC_CH_UA =
-  '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"'
-
-function jamHeaders(auth: Awaited<ReturnType<typeof getSessionAuth>>): Record<
-  string,
-  string
-> {
-  return {
-    Accept: 'application/json',
-    Authorization: `Bearer ${auth.accessToken}`,
-    'client-token': auth.clientToken,
-    'app-platform': 'WebPlayer',
-    'spotify-app-version': auth.clientVersion,
-    Origin: 'https://open.spotify.com',
-    Referer: 'https://open.spotify.com/',
-    'Sec-CH-UA': SEC_CH_UA,
-    'Sec-CH-UA-Mobile': '?0',
-    'Sec-CH-UA-Platform': '"macOS"',
-  }
-}
 
 /** Returns the current jam payload, or null if the user isn't in one. */
 export async function getCurrentSession(
@@ -44,7 +26,7 @@ export async function getCurrentSession(
 ): Promise<unknown | null> {
   const auth = await getSessionAuth(read)
   const res = await fetch(`${JAM_BASE}/current`, {
-    headers: jamHeaders(auth),
+    headers: webPlayerHeaders(auth),
   })
   if (res.status === 404) return null
   if (!res.ok) {
@@ -59,7 +41,7 @@ export async function getCurrentSession(
 export async function startSession(read: CookieReadResult): Promise<unknown> {
   const auth = await getSessionAuth(read)
   const res = await fetch(`${JAM_BASE}/current_or_new`, {
-    headers: jamHeaders(auth),
+    headers: webPlayerHeaders(auth),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -79,7 +61,7 @@ export async function leaveSession(
   const auth = await getSessionAuth(read)
   const res = await fetch(`${JAM_BASE}/${sessionId}`, {
     method: 'DELETE',
-    headers: jamHeaders(auth),
+    headers: webPlayerHeaders(auth),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -87,6 +69,3 @@ export async function leaveSession(
   }
 }
 
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
-}

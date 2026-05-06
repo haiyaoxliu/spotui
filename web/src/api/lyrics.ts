@@ -6,6 +6,8 @@
  * UI can render an empty state instead of a noisy error message.
  */
 
+import { truncate } from '../util/truncate'
+
 export interface LyricsLine {
   startTimeMs: number
   endTimeMs: number
@@ -95,8 +97,4 @@ function parseTime(v: string | number | undefined): number {
     return Number.isFinite(n) ? n : 0
   }
   return 0
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }

@@ -8,6 +8,7 @@
  *   sp_dc=AABBCC; sp_t=device-id   (semicolon-joined like a real Cookie header)
  */
 
+import { truncate } from '../util/truncate.js'
 import type { SpotifyCookie } from './types.js'
 
 export interface PasteResult {
@@ -39,22 +40,18 @@ export function parsePaste(raw: string): PasteResult {
     } else if (colon !== -1) {
       split = colon
     } else {
-      warnings.push(`unrecognized line: ${truncate(seg)}`)
+      warnings.push(`unrecognized line: ${truncate(seg, 80)}`)
       continue
     }
 
     const name = cleaned.slice(0, split).trim()
     const value = cleaned.slice(split + 1).trim()
     if (!name || !value) {
-      warnings.push(`empty name or value: ${truncate(seg)}`)
+      warnings.push(`empty name or value: ${truncate(seg, 80)}`)
       continue
     }
     cookies.push({ name, value, domain: '.spotify.com' })
   }
 
   return { cookies, warnings }
-}
-
-function truncate(s: string): string {
-  return s.length > 80 ? `${s.slice(0, 77)}...` : s
 }

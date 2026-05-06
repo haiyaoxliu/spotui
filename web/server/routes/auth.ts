@@ -21,6 +21,7 @@ import {
   peekCachedToken,
   type WebToken,
 } from '../spotify/token.js'
+import { errMsg, error, json, readJson } from './_http.js'
 
 interface StatusBody {
   mode: 'cookie' | 'none'
@@ -159,33 +160,4 @@ export async function tokenHandler(
 
 async function mintAndCache(read: CookieReadResult): Promise<WebToken> {
   return getToken(read)
-}
-
-// ---- HTTP plumbing ---------------------------------------------------------
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status
-  res.setHeader('Content-Type', 'application/json')
-  res.end(JSON.stringify(body))
-}
-
-function error(res: ServerResponse, status: number, message: string): void {
-  json(res, status, { error: message })
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer)
-    if (chunks.reduce((n, c) => n + c.length, 0) > 1_000_000) {
-      throw new Error('request body too large')
-    }
-  }
-  const raw = Buffer.concat(chunks).toString('utf8')
-  if (raw.length === 0) return {}
-  return JSON.parse(raw)
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
 }

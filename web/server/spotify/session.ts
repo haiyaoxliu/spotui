@@ -18,7 +18,6 @@
  */
 
 import crypto from 'node:crypto'
-import os from 'node:os'
 
 import {
   persistPastedCookies,
@@ -27,11 +26,10 @@ import {
 } from '../cookies/index.js'
 import { findCookie, hasSpDc } from '../cookies/types.js'
 import { readFileCookies } from '../cookies/file.js'
+import { runtimeOs } from '../util/runtime.js'
+import { truncate } from '../util/truncate.js'
+import { APP_PLATFORM, SEC_CH_UA } from './headers.js'
 import { getToken, type WebToken } from './token.js'
-
-const APP_PLATFORM = 'WebPlayer'
-const SEC_CH_UA =
-  '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"'
 
 const CLIENT_TOKEN_URL = 'https://clienttoken.spotify.com/v1/clienttoken'
 const WEB_PLAYER_URL = 'https://open.spotify.com/'
@@ -231,17 +229,6 @@ async function mintClientToken(
   return { token: granted.token, expiresAt }
 }
 
-function runtimeOs(): { osName: string; osVersion: string } {
-  switch (os.platform()) {
-    case 'darwin':
-      return { osName: 'macos', osVersion: 'unknown' }
-    case 'win32':
-      return { osName: 'windows', osVersion: 'unknown' }
-    default:
-      return { osName: 'linux', osVersion: 'unknown' }
-  }
-}
-
 // ---- helpers -----------------------------------------------------------
 
 async function fetchText(url: string): Promise<string> {
@@ -258,10 +245,6 @@ async function fetchText(url: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`${url} → ${res.status}`)
   return res.text()
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }
 
 export { fetchText as _fetchText }

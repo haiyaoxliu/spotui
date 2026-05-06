@@ -23,9 +23,8 @@ import { EventEmitter } from 'node:events'
 
 import WebSocket from 'ws'
 
-import { discoverCookies } from '../cookies/index.js'
-import { hasSpDc } from '../cookies/types.js'
-import { readFileCookies } from '../cookies/file.js'
+import { loadCookies } from '../cookies/index.js'
+import { USER_AGENT } from './headers.js'
 import { getToken } from './token.js'
 
 const DEALER_URL = 'wss://dealer.spotify.com/'
@@ -77,21 +76,18 @@ class DealerClient extends EventEmitter {
     if (this.isConnected() || this.connecting) return
     this.connecting = true
     try {
-      const cookies = await loadCookies()
-      if (!cookies) {
+      const read = await loadCookies()
+      if (!read) {
         console.warn('[spotui] dealer: no cookies; will retry on next subscribe')
         return
       }
-      const tok = await getToken({ cookies, source: 'file' })
+      const tok = await getToken(read)
       const url = new URL(DEALER_URL)
       url.searchParams.set('access_token', tok.accessToken)
 
       this.closedIntentionally = false
       const ws = new WebSocket(url, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        },
+        headers: { 'User-Agent': USER_AGENT },
       })
       this.ws = ws
       ws.on('open', () => {
@@ -199,15 +195,6 @@ class DealerClient extends EventEmitter {
     this.connectionId = null
     this.reconnectAttempts = 0
   }
-}
-
-async function loadCookies(): Promise<
-  Awaited<ReturnType<typeof readFileCookies>> | null
-> {
-  const persisted = await readFileCookies()
-  if (hasSpDc(persisted)) return persisted
-  const { found } = await discoverCookies()
-  return found?.cookies ?? null
 }
 
 let singleton: DealerClient | null = null

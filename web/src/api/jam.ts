@@ -6,6 +6,8 @@
  *   POST /api/proxy/jam/leave  body: { sessionId } → 204
  */
 
+import { truncate } from '../util/truncate'
+
 export interface JamMember {
   id: string
   username: string
@@ -136,8 +138,4 @@ export async function leaveJam(sessionId: string): Promise<void> {
 /** Public-facing share link Spotify uses for jam invites. */
 export function jamShareLink(token: string): string {
   return `https://open.spotify.com/socialsession/${encodeURIComponent(token)}`
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }

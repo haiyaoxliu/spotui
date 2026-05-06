@@ -98,10 +98,6 @@ export interface PlaybackState {
 export interface Queue {
   currently_playing: PlayingItem | null
   queue: PlayingItem[]
-  /** Cookie-mode only: URI of whatever is driving autoplay
-   *  continuation (station, album, etc.). Lets the UI label the
-   *  "Up next from {context}" section without an extra fetch. */
-  autoplay_context_uri?: string
 }
 
 export async function getPlaybackState(): Promise<PlaybackState | null> {

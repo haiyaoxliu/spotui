@@ -9,6 +9,9 @@
  * function so we can extend per-tab without touching the others.
  */
 
+import { truncate } from '../util/truncate'
+import { idFromUri } from '../util/uri'
+
 import type {
   ArtistObject,
   Episode,
@@ -272,12 +275,6 @@ function adaptPlaylists(
 
 // ---- per-entity mappers ------------------------------------------------
 
-function idFromUri(uri: string | undefined): string {
-  if (!uri) return ''
-  const parts = uri.split(':')
-  return parts[parts.length - 1] ?? ''
-}
-
 function mapImages(sources: PfImageSource[] | undefined | null): SpotifyImage[] {
   if (!sources) return []
   return sources
@@ -379,10 +376,6 @@ function formatReleaseDate(
   if (month && day) return `${year}-${month}-${day}`
   if (month) return `${year}-${month}`
   return year
-}
-
-function truncate(s: string): string {
-  return s.length > 200 ? `${s.slice(0, 200)}...` : s
 }
 
 // ============================================================

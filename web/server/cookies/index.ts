@@ -89,6 +89,16 @@ export async function clearAllCookies(): Promise<void> {
   await clearFileCookies()
 }
 
+/** Convenience used by routes + the dealer client: try the on-disk file
+ *  first, fall through to discovery if missing. Returns null if neither
+ *  source has a usable `sp_dc`. */
+export async function loadCookies(): Promise<CookieReadResult | null> {
+  const persisted = await readFileCookies()
+  if (hasSpDc(persisted)) return { cookies: persisted, source: 'file' }
+  const { found } = await discoverCookies()
+  return found
+}
+
 export type {
   CookieReadResult,
   CookieSourceName,

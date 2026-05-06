@@ -27,6 +27,7 @@ import {
 } from './commands'
 import { TransportBar } from './components/TransportBar'
 import { ColorPicker } from './components/ColorPicker'
+import { ControlPane } from './components/ControlPane'
 import { DevicePicker } from './components/DevicePicker'
 import { HelpOverlay } from './components/HelpOverlay'
 import { LibraryPanel } from './components/LibraryPanel'
@@ -131,16 +132,11 @@ function Player({ me }: { me: Me }) {
   const helpOpen = useUI((s) => s.helpOpen)
   const openColorPicker = useUI((s) => s.openColorPicker)
   const colorPickerOpen = useUI((s) => s.colorPickerOpen)
+  const toggleControlPane = useUI((s) => s.toggleControlPane)
   const focusSearch = useUI((s) => s.focusSearch)
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
-  const detailLayout = useUI((s) => s.detailLayout)
   const goBack = useSelection((s) => s.goBack)
-  const setTransportPosition = useUI((s) => s.setTransportPosition)
-  const setSearchPosition = useUI((s) => s.setSearchPosition)
-  const setDetailLayout = useUI((s) => s.setDetailLayout)
-  const theme = useUI((s) => s.theme)
-  const toggleTheme = useUI((s) => s.toggleTheme)
 
   const refresh = useCallback(async () => {
     const [stateRes, queueRes] = await Promise.allSettled([getPlaybackState(), getQueue()])
@@ -296,6 +292,10 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           openColorPicker()
           break
+        case 's':
+          e.preventDefault()
+          toggleControlPane()
+          break
         case 'b':
           e.preventDefault()
           void goBack()
@@ -311,6 +311,7 @@ function Player({ me }: { me: Me }) {
     openDevicePicker,
     openHelp,
     openColorPicker,
+    toggleControlPane,
     focusSearch,
     goBack,
     refresh,
@@ -318,79 +319,12 @@ function Player({ me }: { me: Me }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-sm">
-        <span>
-          <span className="text-neutral-500">Logged in as </span>
-          <span className="font-medium">{me.display_name}</span>
-          {me.product !== 'premium' && (
-            <span className="ml-2 text-yellow-700 dark:text-yellow-400">(non-premium — controls will fail)</span>
-          )}
-        </span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() =>
-              setSearchPosition(searchPosition === 'below' ? 'above' : 'below')
-            }
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title="Toggle search bar position"
-          >
-            search: {searchPosition}
-          </button>
-          <button
-            onClick={() => setDetailLayout(detailLayout === 'below' ? 'right' : 'below')}
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title="Toggle row detail layout"
-          >
-            details: {detailLayout}
-          </button>
-          <button
-            onClick={() =>
-              setTransportPosition(transportPosition === 'bottom' ? 'right' : 'bottom')
-            }
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title="Toggle transport bar position"
-          >
-            controls: {transportPosition}
-          </button>
-          <button
-            onClick={openDevicePicker}
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title="Pick device (d)"
-          >
-            Device (d)
-          </button>
-          <button
-            onClick={toggleTheme}
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          >
-            theme: {theme}
-          </button>
-          <button
-            onClick={openColorPicker}
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title="Customize colors (c)"
-          >
-            Colors (c)
-          </button>
-          <button
-            onClick={openHelp}
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-            title="Show keybinds (?)"
-          >
-            ?
-          </button>
-          <button
-            onClick={() => {
-              logout()
-              window.location.reload()
-            }}
-            className="px-2 py-1 rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs"
-          >
-            Log out
-          </button>
-        </div>
-      </header>
+      <ConsoleBar
+        me={me}
+        onOpenDevices={openDevicePicker}
+        onOpenHelp={openHelp}
+        onToggleControls={toggleControlPane}
+      />
       <main className="flex-1 overflow-hidden flex">
         <LibraryPanel ownerId={me.id} onAfterAction={() => void refresh()} />
         <SelectedPlaylist
@@ -409,6 +343,98 @@ function Player({ me }: { me: Me }) {
       <DevicePicker onAfterTransfer={() => void refresh()} />
       <HelpOverlay />
       <ColorPicker />
+      <ControlPane />
     </div>
+  )
+}
+
+/**
+ * Tight top "console" bar. Branding/user info on the left, three primary
+ * actions on the right: Device, Help, and a gear that opens the slide-in
+ * control pane (which holds the unified layout/theme/account controls).
+ */
+function ConsoleBar({
+  me,
+  onOpenDevices,
+  onOpenHelp,
+  onToggleControls,
+}: {
+  me: Me
+  onOpenDevices: () => void
+  onOpenHelp: () => void
+  onToggleControls: () => void
+}) {
+  const playback = usePlayer((s) => s.playback)
+  const itemName =
+    playback?.item?.name ??
+    (playback?.is_playing ? 'Playing' : null)
+  const itemSub =
+    playback?.item?.type === 'track'
+      ? playback.item.artists.map((a) => a.name).join(', ')
+      : ''
+
+  return (
+    <header className="h-9 px-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center gap-3 text-xs bg-neutral-50/80 dark:bg-neutral-950/40 backdrop-blur">
+      <span className="font-mono text-neutral-500 select-none">spotui</span>
+      <span className="text-neutral-400 dark:text-neutral-600">·</span>
+      <span className="text-neutral-600 dark:text-neutral-400 truncate max-w-[16rem]">
+        <span className="text-neutral-500">{me.display_name}</span>
+        {me.product !== 'premium' && (
+          <span className="ml-2 text-yellow-700 dark:text-yellow-400">
+            (non-premium)
+          </span>
+        )}
+      </span>
+      <span className="flex-1 min-w-0 truncate text-neutral-500 dark:text-neutral-500">
+        {itemName && (
+          <>
+            <span className="text-neutral-400 dark:text-neutral-600 mr-2">▸</span>
+            <span className="text-neutral-700 dark:text-neutral-300">
+              {itemName}
+            </span>
+            {itemSub && (
+              <span className="ml-2 text-neutral-500">— {itemSub}</span>
+            )}
+          </>
+        )}
+      </span>
+      <div className="flex items-center gap-1">
+        <ConsoleButton onClick={onOpenDevices} title="Devices (d)">
+          d
+        </ConsoleButton>
+        <ConsoleButton onClick={onOpenHelp} title="Keybinds (?)">
+          ?
+        </ConsoleButton>
+        <ConsoleButton
+          onClick={onToggleControls}
+          title="Settings (s)"
+          aria-label="Settings"
+        >
+          ⚙
+        </ConsoleButton>
+      </div>
+    </header>
+  )
+}
+
+function ConsoleButton({
+  onClick,
+  title,
+  children,
+  ...rest
+}: {
+  onClick: () => void
+  title: string
+  children: React.ReactNode
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'title' | 'children'>) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="w-7 h-7 rounded text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 flex items-center justify-center"
+      {...rest}
+    >
+      {children}
+    </button>
   )
 }

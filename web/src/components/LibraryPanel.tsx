@@ -50,8 +50,7 @@ export function LibraryPanel({
   }
 
   // Pinning operates on flat playlists — we pull pinned ones to the top
-  // regardless of folder placement. Non-pinned ones render as the
-  // hierarchical entries list below the pin divider.
+  // regardless of folder placement.
   const pinnedPlaylists = useMemo(() => {
     const pinnedSet = new Set(pinnedIds)
     const pinned = playlists.filter((p) => pinnedSet.has(p.id))
@@ -61,17 +60,46 @@ export function LibraryPanel({
     return pinned
   }, [playlists, pinnedIds])
 
-  // Skip pinned entries from the hierarchical list — they're shown above.
-  const regularEntries = useMemo(() => {
+  // Group folders + their contents separately from top-level playlists so
+  // the panel reads as two clean sections instead of an interleaved list.
+  // We treat the entries list as a sequence; a Folder row at depth=0 begins
+  // a "folder block" that runs through every following depth>0 row up to
+  // the next depth=0 row. Top-level playlists go into a separate bucket.
+  type FolderBlock = {
+    folder: Extract<LibraryEntry, { kind: 'folder' }>
+    children: LibraryEntry[]
+  }
+  const { folderBlocks, topLevelPlaylists } = useMemo(() => {
     const pinnedSet = new Set(pinnedIds)
-    return entries.filter(
-      (e) => e.kind !== 'playlist' || !pinnedSet.has(e.playlist.id),
-    )
+    const blocks: FolderBlock[] = []
+    const topLevel: Extract<LibraryEntry, { kind: 'playlist' }>[] = []
+    let current: FolderBlock | null = null
+    for (const e of entries) {
+      if (e.kind === 'folder' && e.depth === 0) {
+        current = { folder: e, children: [] }
+        blocks.push(current)
+        continue
+      }
+      // Anything at depth > 0 belongs to the most recently opened folder
+      // block. If there is no block (shouldn't happen in practice), fall
+      // through to top-level so we don't drop the row.
+      if (e.depth > 0 && current) {
+        if (e.kind === 'playlist' && pinnedSet.has(e.playlist.id)) continue
+        current.children.push(e)
+        continue
+      }
+      // depth=0 playlist (or stray nested folder with no parent block)
+      current = null
+      if (e.kind === 'playlist' && !pinnedSet.has(e.playlist.id)) {
+        topLevel.push(e)
+      }
+    }
+    return { folderBlocks: blocks, topLevelPlaylists: topLevel }
   }, [entries, pinnedIds])
 
   // Fallback flat list for PKCE-only mode (entries empty).
   const regularPlaylistsFlat = useMemo(() => {
-    if (entries.length > 0) return [] // entries-mode renders via regularEntries
+    if (entries.length > 0) return [] // entries-mode renders via folderBlocks + topLevelPlaylists
     const pinnedSet = new Set(pinnedIds)
     return playlists.filter((p) => !pinnedSet.has(p.id))
   }, [entries, playlists, pinnedIds])
@@ -178,7 +206,7 @@ export function LibraryPanel({
     )
   }
 
-  function renderEntry(e: LibraryEntry, idx: number) {
+  function renderChildEntry(e: LibraryEntry, idx: number) {
     if (e.kind === 'folder') {
       return (
         <FolderRow
@@ -201,12 +229,23 @@ export function LibraryPanel({
     )
   }
 
+  const hasContent =
+    pinnedPlaylists.length > 0 ||
+    folderBlocks.length > 0 ||
+    topLevelPlaylists.length > 0 ||
+    regularPlaylistsFlat.length > 0
+
   return (
     <aside className="border-r border-neutral-200 dark:border-neutral-800 bg-neutral-100/60 dark:bg-neutral-900/40 w-64 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
+      <div className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 relative">
         <h2 className="text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400 tracking-wider">
           Library
         </h2>
+        {/* Loading hint as a thin pulse strip rather than a text row that
+         *  pushes content down. Visible only while `loading` is true. */}
+        {loading && (
+          <div className="absolute left-0 right-0 bottom-0 h-0.5 bg-[var(--color-accent)] opacity-60 animate-pulse" />
+        )}
       </div>
       <div className="overflow-auto flex-1">
         <ul>
@@ -236,31 +275,64 @@ export function LibraryPanel({
             <PlaylistRow key={`pin:${pl.id}`} pl={pl} pinned />
           ))}
         </ul>
-        <div className="border-t border-neutral-200 dark:border-neutral-800 my-2" />
-        {loading && (
-          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">
-            Loading playlists…
-          </p>
-        )}
+
         {error && (
           <p className="px-4 py-2 text-sm text-red-600 dark:text-red-400">{error}</p>
         )}
-        {loaded &&
-          regularEntries.length === 0 &&
-          regularPlaylistsFlat.length === 0 &&
-          pinnedPlaylists.length === 0 &&
-          !error && (
-            <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">
-              No playlists.
-            </p>
-          )}
-        <ul>
-          {entries.length > 0
-            ? regularEntries.map((e, idx) => renderEntry(e, idx))
-            : regularPlaylistsFlat.map((pl) => (
-                <PlaylistRow key={pl.id} pl={pl} pinned={false} />
+
+        {loaded && !error && !hasContent && (
+          <p className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-500">
+            No playlists.
+          </p>
+        )}
+
+        {/* Folders section — every folder block (depth=0 folder + its
+         *  expanded children) lives here, separate from top-level playlists. */}
+        {folderBlocks.length > 0 && (
+          <>
+            <SectionHeader>Folders</SectionHeader>
+            <ul>
+              {folderBlocks.map((block, blockIdx) => (
+                <li key={`block:${block.folder.uri}:${blockIdx}`}>
+                  <ul>
+                    <FolderRow
+                      uri={block.folder.uri}
+                      name={block.folder.name}
+                      depth={0}
+                      playlistCount={block.folder.playlistCount}
+                      folderCount={block.folder.folderCount}
+                    />
+                    {block.children.map((child, idx) =>
+                      renderChildEntry(child, idx),
+                    )}
+                  </ul>
+                </li>
               ))}
-        </ul>
+            </ul>
+          </>
+        )}
+
+        {/* Top-level playlists — the entries that aren't inside a folder
+         *  and aren't pinned. In PKCE-fallback mode (no entries) we render
+         *  the flat list here too. */}
+        {(topLevelPlaylists.length > 0 || regularPlaylistsFlat.length > 0) && (
+          <>
+            <SectionHeader>Playlists</SectionHeader>
+            <ul>
+              {entries.length > 0
+                ? topLevelPlaylists.map((e, idx) => (
+                    <PlaylistRow
+                      key={`p:${e.playlist.id}:${idx}`}
+                      pl={e.playlist}
+                      pinned={false}
+                    />
+                  ))
+                : regularPlaylistsFlat.map((pl) => (
+                    <PlaylistRow key={pl.id} pl={pl} pinned={false} />
+                  ))}
+            </ul>
+          </>
+        )}
         {loaded && entries.length === 0 && (
           <LoadMoreFooter
             loadingMore={loadingMore}
@@ -273,5 +345,13 @@ export function LibraryPanel({
         )}
       </div>
     </aside>
+  )
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-500">
+      {children}
+    </div>
   )
 }

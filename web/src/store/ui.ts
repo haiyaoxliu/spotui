@@ -104,6 +104,13 @@ interface UIState {
   colorPickerOpen: boolean
   openColorPicker: () => void
   closeColorPicker: () => void
+  // Right-edge slide-in drawer that holds the unified toggles + log out.
+  // Opens with the `s` key (and the gear button in the console bar);
+  // closes with esc or `s` again.
+  controlPaneOpen: boolean
+  openControlPane: () => void
+  closeControlPane: () => void
+  toggleControlPane: () => void
   // Theme + per-theme color profiles. The active --color-accent and
   // --color-external CSS vars always reflect the current theme's pair, so
   // consumers don't care which profile produced them.
@@ -154,6 +161,10 @@ export const useUI = create<UIState>((set, get) => ({
   colorPickerOpen: false,
   openColorPicker: () => set({ colorPickerOpen: true }),
   closeColorPicker: () => set({ colorPickerOpen: false }),
+  controlPaneOpen: false,
+  openControlPane: () => set({ controlPaneOpen: true }),
+  closeControlPane: () => set({ controlPaneOpen: false }),
+  toggleControlPane: () => set((s) => ({ controlPaneOpen: !s.controlPaneOpen })),
   theme: initialTheme,
   setTheme: (t) => {
     localStorage.setItem(THEME_KEY, t)

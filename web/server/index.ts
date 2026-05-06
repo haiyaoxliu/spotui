@@ -44,6 +44,7 @@ import {
   pathfinderHandler,
   playlistTracksHandler,
   searchHandler,
+  stateRawHandler,
   stateSnapshotHandler,
   stateStreamHandler,
 } from './routes/proxy.js'
@@ -69,9 +70,10 @@ const ROUTES: Route[] = [
   { path: '/api/proxy/library/albums', method: 'GET', handler: libraryAlbumsHandler },
   { path: '/api/proxy/library/tracks', method: 'GET', handler: libraryTracksHandler },
   { path: '/api/proxy/playlist', method: 'GET', handler: playlistTracksHandler },
-  // /state/stream MUST be registered before /state — Connect's prefix
-  // matching means /state would otherwise swallow /state/stream requests.
+  // /state/stream and /state/raw MUST come before /state — Connect's
+  // prefix matching means /state would otherwise swallow them.
   { path: '/api/proxy/state/stream', method: 'GET', handler: stateStreamHandler },
+  { path: '/api/proxy/state/raw', method: 'GET', handler: stateRawHandler },
   { path: '/api/proxy/state', method: 'GET', handler: stateSnapshotHandler },
   { path: '/api/proxy/lyrics', method: 'GET', handler: lyricsHandler },
   { path: '/api/proxy/connect/play', method: 'POST', handler: connectPlayHandler },

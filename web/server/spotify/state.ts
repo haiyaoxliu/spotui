@@ -41,6 +41,13 @@ interface Album {
   uri: string
   images: SpotifyImage[]
 }
+/** Connect-state's `next_tracks[].provider` tells us where each upcoming
+ *  track came from. The Web Player UI sections by this:
+ *    - 'queue' — user-added via Add to Queue
+ *    - 'context' — continues the active album/playlist/show
+ *    - 'autoplay' — algorithmic recommendations after the context ends
+ *  Anything else is preserved as-is so we don't silently drop new values. */
+type QueueProvider = 'queue' | 'context' | 'autoplay' | string
 interface Track {
   id: string
   name: string
@@ -49,6 +56,8 @@ interface Track {
   artists: Artist[]
   album: Album
   type: 'track'
+  /** Cookie-mode only; absent when sourced from /v1/me/player. */
+  _provider?: QueueProvider
 }
 interface Episode {
   id: string
@@ -57,6 +66,7 @@ interface Episode {
   duration_ms: number
   show?: { id: string; name: string; images: SpotifyImage[] }
   type: 'episode'
+  _provider?: QueueProvider
 }
 type PlayingItem = Track | Episode
 interface Device {
@@ -81,7 +91,16 @@ interface PlaybackState {
 }
 interface Queue {
   currently_playing: PlayingItem | null
+  /** Public-Web-API contract: a flat list of upcoming items. Cookie-mode
+   *  preserves the same shape but each item carries a `_provider` tag so
+   *  the UI can section "Queue" (user-added) from "Up next" (autoplay /
+   *  context continuation). The /v1/me/player/queue path leaves
+   *  `_provider` undefined, since the public API doesn't expose it. */
   queue: PlayingItem[]
+  /** Cookie-mode only: the URI of the context driving autoplay
+   *  continuation, when one is known. Lets the UI label "Next from
+   *  {context}" without poking the player_state separately. */
+  autoplay_context_uri?: string
 }
 
 interface RawCluster {
@@ -113,8 +132,19 @@ interface RawPlayerState {
 interface RawTrack {
   uri?: string
   uid?: string
+  /** Connect-state encodes the "currently playing" track and queued
+   *  `next_tracks` entries with subtly different shapes. The current
+   *  track is usually a flat `metadata` dict; queued entries sometimes
+   *  include richer nested fields (Pathfinder-style) at the top level.
+   *  We probe both — see `mapTrack`. */
   metadata?: Record<string, string>
   provider?: string
+  // Sometimes-present richer fields (mirror what spogo finds via
+  // `findFirstArtistNames` / `findFirstName`).
+  name?: string
+  title?: string
+  duration_ms?: number | string
+  artists?: unknown
 }
 
 interface RawDevice {
@@ -144,6 +174,24 @@ export async function fetchClusterSnapshot(
     playback: mapPlayback(cluster),
     queue: mapQueue(cluster),
     devices: mapDevices(cluster),
+  }
+}
+
+/** Diagnostic-only: returns the raw cluster pull plus the mapped output
+ *  so we can audit field-shape drift. Mounted at /api/proxy/state/raw.
+ *  Safe to leave in — the cluster contains nothing the cookie holder
+ *  doesn't already see in their /v1/me/player feed. */
+export async function fetchRawCluster(
+  read: CookieReadResult,
+): Promise<{ cluster: unknown; mapped: ClusterSnapshot }> {
+  const cluster = (await connectClient.state(read)) as RawCluster
+  return {
+    cluster,
+    mapped: {
+      playback: mapPlayback(cluster),
+      queue: mapQueue(cluster),
+      devices: mapDevices(cluster),
+    },
   }
 }
 
@@ -196,13 +244,31 @@ function mapPlayback(cluster: RawCluster): PlaybackState | null {
 function mapQueue(cluster: RawCluster): Queue {
   const player = cluster.player_state
   if (!player) return { currently_playing: null, queue: [] }
-  const next = (player.next_tracks ?? []).flatMap((t) => {
+  const rawNext = player.next_tracks ?? []
+  const next = rawNext.flatMap((t) => {
     const m = mapTrack(t)
-    return m ? [m] : []
+    if (!m) return []
+    if (t.provider) m._provider = t.provider
+    return [m]
   })
+  // Best-effort autoplay context: the first autoplay entry's metadata
+  // carries `context_uri` pointing to whatever is driving recommendations
+  // ("station", album, etc.). Pass it through so the UI can label the
+  // section without re-fetching anything.
+  let autoplayContext: string | undefined
+  for (const t of rawNext) {
+    if (t.provider === 'autoplay') {
+      const ctx = t.metadata?.context_uri
+      if (typeof ctx === 'string' && ctx.length > 0) {
+        autoplayContext = ctx
+        break
+      }
+    }
+  }
   return {
     currently_playing: mapTrack(player.track),
     queue: next,
+    autoplay_context_uri: autoplayContext,
   }
 }
 
@@ -212,12 +278,20 @@ function mapTrack(raw: RawTrack | undefined): PlayingItem | null {
   if (kind === 'episode') return mapEpisodeShape(raw)
   if (kind !== 'track') return null
   const md = raw.metadata ?? {}
+  // Title: prefer flat metadata, fall back to top-level (next_tracks
+  // entries sometimes carry Pathfinder-shaped fields directly).
+  const name = md.title ?? raw.name ?? raw.title ?? ''
+  // Duration: metadata.duration (string ms), then top-level numeric.
+  const duration =
+    parseIntStr(md.duration ?? '', NaN) ||
+    parseIntStr(raw.duration_ms ?? '', NaN) ||
+    0
   return {
     id: idFromUri(raw.uri),
     uri: raw.uri,
-    name: md.title ?? '',
-    duration_ms: parseIntStr(md.duration ?? '0', 0),
-    artists: mapArtists(md, raw.uri),
+    name,
+    duration_ms: duration,
+    artists: mapArtists(md, raw),
     album: {
       id: md.album_uri ? idFromUri(md.album_uri) : '',
       name: md.album_title ?? '',
@@ -248,19 +322,26 @@ function mapEpisodeShape(raw: RawTrack): PlayingItem | null {
   }
 }
 
-/** Connect-state metadata enumerates artists as `artist_name`, then
- *  `artist_name_1`, `artist_name_2`, … (with matching `artist_uri_*`).
- *  Walk numerically until a gap appears. */
+/** Connect-state encodes track artists in at least three ways depending
+ *  on which list the track came from:
+ *    1. Flat metadata: `artist_name`, then `artist_name_1`, _2, …
+ *       (with parallel `artist_uri_*`). Used by `next_tracks` entries
+ *       in the queue.
+ *    2. Top-level `artists` array of `{name, uri}` or `{profile: {name}, uri}`.
+ *       Used by some `player_state.track` shapes the player normalized.
+ *    3. Top-level `artists.items[].profile.name` (Pathfinder-style).
+ *  We try each in order so player_state.track and next_tracks[i] both
+ *  resolve to a populated list. */
 function mapArtists(
   md: Record<string, string>,
-  trackUri: string,
+  raw: RawTrack,
 ): Track['artists'] {
+  // (1) flat metadata
   const out: Track['artists'] = []
-  const primary = md.artist_name
-  if (primary) {
+  if (md.artist_name) {
     out.push({
       id: md.artist_uri ? idFromUri(md.artist_uri) : '',
-      name: primary,
+      name: md.artist_name,
       uri: md.artist_uri ?? '',
     })
   }
@@ -270,12 +351,62 @@ function mapArtists(
     const uri = md[`artist_uri_${i}`] ?? ''
     out.push({ id: uri ? idFromUri(uri) : '', name, uri })
   }
-  // Fall back to a synthetic empty array. The SPA already handles this
-  // (e.g. `playback.item.artists.map((a) => a.name).join(', ')`).
-  if (out.length === 0) {
-    void trackUri
+  if (out.length > 0) return out
+  // (2) + (3) top-level — walk whatever shape we find.
+  return extractArtistList(raw.artists)
+}
+
+/** Recursively probe an unknown value for `{name, uri}` artist entries.
+ *  Handles both bare arrays (`[{name, uri}, ...]`) and the GraphQL
+ *  container variants (`{items: [...]}`, `{nodes: [...]}`,
+ *  `{edges: [{node: {...}}, ...]}`) that Pathfinder responses use. */
+function extractArtistList(value: unknown): Track['artists'] {
+  const out: Track['artists'] = []
+  walk(value, (m) => {
+    // Bail early once we have at least one named artist; recursion runs
+    // depth-first so the first hit is the topmost match.
+    if (out.length > 0) return
+    const list = (m as { items?: unknown[]; nodes?: unknown[]; edges?: unknown[] })
+    const entries = list.items ?? list.nodes ?? list.edges
+    if (Array.isArray(entries)) {
+      for (const entry of entries) {
+        const a = artistFromEntry(entry)
+        if (a) out.push(a)
+      }
+    }
+  })
+  if (out.length === 0 && Array.isArray(value)) {
+    for (const entry of value) {
+      const a = artistFromEntry(entry)
+      if (a) out.push(a)
+    }
   }
   return out
+}
+
+function artistFromEntry(entry: unknown): Track['artists'][number] | null {
+  if (!entry || typeof entry !== 'object') return null
+  const e = entry as { uri?: string; name?: string; profile?: { name?: string }; node?: unknown }
+  if (e.node) return artistFromEntry(e.node)
+  const name = e.profile?.name ?? e.name
+  if (!name) return null
+  return {
+    id: e.uri ? idFromUri(e.uri) : '',
+    name,
+    uri: e.uri ?? '',
+  }
+}
+
+function walk(value: unknown, fn: (m: object) => void): void {
+  if (value === null || value === undefined) return
+  if (Array.isArray(value)) {
+    for (const v of value) walk(v, fn)
+    return
+  }
+  if (typeof value === 'object') {
+    fn(value)
+    for (const v of Object.values(value)) walk(v, fn)
+  }
 }
 
 function mapAlbumImages(md: Record<string, string>): Track['album']['images'] {
@@ -290,12 +421,27 @@ function mapAlbumImages(md: Record<string, string>): Track['album']['images'] {
     'image_url',
     'image_small_url',
   ]) {
-    const url = md[key]
-    if (typeof url === 'string' && url.length > 0) {
-      images.push({ url, width: null, height: null })
+    const raw = md[key]
+    if (typeof raw === 'string' && raw.length > 0) {
+      const url = normalizeImageUrl(raw)
+      if (url) images.push({ url, width: null, height: null })
     }
   }
   return images
+}
+
+/** Connect-state's currently-playing track returns image_url as Spotify's
+ *  internal URI form (`spotify:image:ab67…`); the queue entries return
+ *  full https URLs (`https://i.scdn.co/image/ab67…`). The browser can't
+ *  load the URI form. Convert when we detect it; pass https through. */
+function normalizeImageUrl(value: string): string {
+  if (value.startsWith('spotify:image:')) {
+    const id = value.slice('spotify:image:'.length)
+    if (!/^[A-Za-z0-9]+$/.test(id)) return ''
+    return `https://i.scdn.co/image/${id}`
+  }
+  if (value.startsWith('http://') || value.startsWith('https://')) return value
+  return ''
 }
 
 // ---- helpers ----------------------------------------------------------

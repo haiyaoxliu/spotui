@@ -25,7 +25,7 @@ import {
   pathfinderQuery,
   searchDesktopVariables,
 } from '../spotify/pathfinder.js'
-import { fetchClusterSnapshot } from '../spotify/state.js'
+import { fetchClusterSnapshot, fetchRawCluster } from '../spotify/state.js'
 
 interface PathfinderBody {
   operation?: unknown
@@ -379,6 +379,24 @@ export async function jamLeaveHandler(
   try {
     await leaveSession(read, body.sessionId)
     noContent(res)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** GET /api/proxy/state/raw — diagnostic. Returns the unmapped
+ *  connect-state cluster alongside the mapped output, so we can audit
+ *  field-shape drift between Spotify's `player_state.track` and
+ *  `next_tracks[i]` without redeploying the SPA. */
+export async function stateRawHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await fetchRawCluster(read)
+    json(res, 200, payload)
   } catch (e) {
     error(res, 502, errMsg(e))
   }

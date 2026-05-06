@@ -45,6 +45,11 @@ export interface Album {
   images: SpotifyImage[]
 }
 
+/** Where an upcoming queue entry came from. Connect-state populates this
+ *  in cookie mode; the public Web API (`/v1/me/player/queue`) doesn't
+ *  expose it, so the field is absent in PKCE-only mode. */
+export type QueueProvider = 'queue' | 'context' | 'autoplay' | string
+
 export interface Track {
   id: string
   name: string
@@ -53,6 +58,7 @@ export interface Track {
   artists: Artist[]
   album: Album
   type: 'track'
+  _provider?: QueueProvider
 }
 
 export interface Episode {
@@ -62,6 +68,7 @@ export interface Episode {
   duration_ms: number
   show?: { id: string; name: string; images: SpotifyImage[] }
   type: 'episode'
+  _provider?: QueueProvider
 }
 
 export type PlayingItem = Track | Episode
@@ -91,6 +98,10 @@ export interface PlaybackState {
 export interface Queue {
   currently_playing: PlayingItem | null
   queue: PlayingItem[]
+  /** Cookie-mode only: URI of whatever is driving autoplay
+   *  continuation (station, album, etc.). Lets the UI label the
+   *  "Up next from {context}" section without an extra fetch. */
+  autoplay_context_uri?: string
 }
 
 export async function getPlaybackState(): Promise<PlaybackState | null> {

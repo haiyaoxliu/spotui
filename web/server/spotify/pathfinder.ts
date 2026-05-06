@@ -120,3 +120,51 @@ export function searchDesktopVariables(
     includeArtistHasConcertsField: false,
   }
 }
+
+/** Saved playlists / saved albums. Filter is `Playlists` or `Albums`.
+ *  Variables match spogo's `libraryV3Variables`. */
+export function libraryV3Variables(
+  filter: 'Playlists' | 'Albums',
+  limit: number,
+  offset: number,
+): Record<string, unknown> {
+  return {
+    filters: [filter],
+    order: null,
+    textFilter: '',
+    features: ['LIKED_SONGS', 'YOUR_EPISODES'],
+    limit,
+    offset,
+    flatten: false,
+    expandedFolders: [],
+    folderUri: null,
+    includeFoldersWhenFlattening: true,
+    withCuration: false,
+  }
+}
+
+/** Saved tracks (Liked Songs). Different operation from libraryV3. */
+export function fetchLibraryTracksVariables(
+  limit: number,
+  offset: number,
+): Record<string, unknown> {
+  return {
+    uri: 'spotify:collection:tracks',
+    offset,
+    limit,
+  }
+}
+
+/** Tracks of a specific playlist by id. Editorial playlists work here. */
+export function fetchPlaylistVariables(
+  playlistId: string,
+  limit: number,
+  offset: number,
+): Record<string, unknown> {
+  return {
+    uri: `spotify:playlist:${playlistId}`,
+    offset,
+    limit,
+    enableWatchFeedEntrypoint: false,
+  }
+}

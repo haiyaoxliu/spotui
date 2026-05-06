@@ -1,6 +1,7 @@
 import { api } from './client'
 import {
   buildPathfinderNextUrl,
+  fetchPageViaPathfinder,
   isPathfinderNextUrl,
   searchMoreViaPathfinder,
   searchViaPathfinder,
@@ -162,6 +163,15 @@ export interface PageSlice<T> {
   total: number | null
 }
 export async function fetchPage<T>(path: string): Promise<PageSlice<T>> {
+  // Cookie/Pathfinder path first; transparently falls back to public Web
+  // API on transport / sidecar / Spotify error so callers don't have to
+  // know which backend served them.
+  try {
+    const slice = await fetchPageViaPathfinder<T>(path)
+    if (slice) return slice
+  } catch (e) {
+    console.warn('[spotui] pathfinder fetchPage failed, falling back:', e)
+  }
   const page = await api<Page<T>>(path)
   if (!page) return { items: [], nextPath: null, total: null }
   return {

@@ -9,6 +9,9 @@ import { discoverCookies, type CookieReadResult } from '../cookies/index.js'
 import { hasSpDc } from '../cookies/types.js'
 import { readFileCookies } from '../cookies/file.js'
 import {
+  fetchLibraryTracksVariables,
+  fetchPlaylistVariables,
+  libraryV3Variables,
   pathfinderQuery,
   searchDesktopVariables,
 } from '../spotify/pathfinder.js'
@@ -82,6 +85,83 @@ export async function searchHandler(
       read,
       'searchDesktop',
       searchDesktopVariables(q, limit, offset),
+    )
+    json(res, 200, payload)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** GET /api/proxy/library/playlists?limit=…&offset=…
+ *  GET /api/proxy/library/albums?limit=…&offset=…
+ *  Wraps libraryV3 with the filter set. */
+function libraryHandler(filter: 'Playlists' | 'Albums') {
+  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? '/', 'http://_')
+    const limit = clampInt(url.searchParams.get('limit'), 50, 1, 200)
+    const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
+    const read = await loadCookies()
+    if (!read) return error(res, 401, 'no cookies')
+    try {
+      const payload = await pathfinderQuery(
+        read,
+        'libraryV3',
+        libraryV3Variables(filter, limit, offset),
+      )
+      json(res, 200, payload)
+    } catch (e) {
+      error(res, 502, errMsg(e))
+    }
+  }
+}
+
+export const libraryPlaylistsHandler = libraryHandler('Playlists')
+export const libraryAlbumsHandler = libraryHandler('Albums')
+
+/** GET /api/proxy/library/tracks?limit=…&offset=…
+ *  Liked Songs via fetchLibraryTracks. */
+export async function libraryTracksHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://_')
+  const limit = clampInt(url.searchParams.get('limit'), 50, 1, 200)
+  const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await pathfinderQuery(
+      read,
+      'fetchLibraryTracks',
+      fetchLibraryTracksVariables(limit, offset),
+    )
+    json(res, 200, payload)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** GET /api/proxy/playlist/:id/items?limit=…&offset=…
+ *  Tracks of a playlist via fetchPlaylist — works on editorial playlists.
+ *  Mounted at the `/api/proxy/playlist` prefix; Connect strips that
+ *  before calling us, so we parse `/:id/items` out of the leftover URL. */
+export async function playlistTracksHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://_')
+  const m = url.pathname.match(/^\/([^/]+)\/items$/)
+  if (!m) return error(res, 404, 'expected /api/proxy/playlist/:id/items')
+  const playlistId = decodeURIComponent(m[1])
+  const limit = clampInt(url.searchParams.get('limit'), 100, 1, 500)
+  const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await pathfinderQuery(
+      read,
+      'fetchPlaylist',
+      fetchPlaylistVariables(playlistId, limit, offset),
     )
     json(res, 200, payload)
   } catch (e) {

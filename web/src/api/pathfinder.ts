@@ -11,7 +11,11 @@
 
 import type {
   ArtistObject,
+  Episode,
+  PageSlice,
   Playlist,
+  PlaylistItem,
+  SavedTrack,
   SearchResults,
   SearchTab,
   SimplifiedAlbum,
@@ -341,4 +345,299 @@ function formatReleaseDate(
 
 function truncate(s: string): string {
   return s.length > 200 ? `${s.slice(0, 200)}...` : s
+}
+
+// ============================================================
+// Library reads (libraryV3 / fetchLibraryTracks / fetchPlaylist)
+// ============================================================
+
+/** Try to satisfy a paged-API path via Pathfinder. Returns null if the path
+ *  isn't one we know how to route — caller should fall back to public API. */
+export async function fetchPageViaPathfinder<T>(
+  path: string,
+): Promise<PageSlice<T> | null> {
+  const m = matchPagedPath(path)
+  if (!m) return null
+  switch (m.kind) {
+    case 'me-playlists': {
+      const slice = await libraryPlaylistsViaPathfinder(m.limit, m.offset)
+      return slice as unknown as PageSlice<T>
+    }
+    case 'me-tracks': {
+      const slice = await libraryTracksViaPathfinder(m.limit, m.offset)
+      return slice as unknown as PageSlice<T>
+    }
+    case 'playlist-items': {
+      const slice = await playlistTracksViaPathfinder(
+        m.playlistId,
+        m.limit,
+        m.offset,
+      )
+      return slice as unknown as PageSlice<T>
+    }
+  }
+}
+
+type PagedPathMatch =
+  | { kind: 'me-playlists'; limit: number; offset: number }
+  | { kind: 'me-tracks'; limit: number; offset: number }
+  | { kind: 'playlist-items'; playlistId: string; limit: number; offset: number }
+
+function matchPagedPath(path: string): PagedPathMatch | null {
+  const u = new URL(path, 'http://_')
+  const limit = clampInt(u.searchParams.get('limit'), 50, 1, 200)
+  const offset = clampInt(u.searchParams.get('offset'), 0, 0, 100_000)
+  // /me/playlists or /me/tracks
+  if (u.pathname === '/me/playlists') return { kind: 'me-playlists', limit, offset }
+  if (u.pathname === '/me/tracks') return { kind: 'me-tracks', limit, offset }
+  // /playlists/{id}/items
+  const pm = u.pathname.match(/^\/playlists\/([^/]+)\/items$/)
+  if (pm) {
+    return {
+      kind: 'playlist-items',
+      playlistId: pm[1],
+      limit: clampInt(u.searchParams.get('limit'), 100, 1, 500),
+      offset,
+    }
+  }
+  return null
+}
+
+function clampInt(
+  raw: string | null,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (!raw) return fallback
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, n))
+}
+
+function nextPath(
+  basePath: string,
+  fetched: number,
+  offset: number,
+  total: number,
+  limit: number,
+): string | null {
+  if (fetched <= 0 || offset + fetched >= total) return null
+  const u = new URL(basePath, 'http://_')
+  u.searchParams.set('limit', String(limit))
+  u.searchParams.set('offset', String(offset + fetched))
+  return `${u.pathname}?${u.searchParams.toString()}`
+}
+
+// ---- libraryV3 (Playlists) ---------------------------------------------
+
+interface LibraryV3Page {
+  totalCount?: number
+  items?: LibraryV3Item[]
+}
+
+interface LibraryV3Item {
+  addedAt?: { isoString?: string }
+  pinned?: boolean
+  item?: {
+    _uri?: string
+    data?: LibraryV3ItemData
+  }
+}
+
+interface LibraryV3ItemData {
+  __typename?: string // 'Playlist' | 'PseudoPlaylist' | 'Album'
+  uri?: string
+  name?: string
+  count?: number
+  image?: {
+    sources?: PfImageSource[]
+  } | null
+}
+
+async function libraryPlaylistsViaPathfinder(
+  limit: number,
+  offset: number,
+): Promise<PageSlice<Playlist>> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const res = await fetch(`/api/proxy/library/playlists?${params}`)
+  if (!res.ok) throw new Error(`library playlists ${res.status}`)
+  const env = (await res.json()) as { data?: { me?: { libraryV3?: LibraryV3Page } } }
+  const page = env.data?.me?.libraryV3
+  const items = (page?.items ?? []).flatMap((it) => {
+    const mapped = mapLibraryPlaylist(it)
+    return mapped ? [mapped] : []
+  })
+  const total = page?.totalCount ?? items.length
+  return {
+    items,
+    nextPath: nextPath('/me/playlists', items.length, offset, total, limit),
+    total,
+  }
+}
+
+function mapLibraryPlaylist(it: LibraryV3Item): Playlist | null {
+  const data = it.item?.data
+  if (!data?.uri || !data.name) return null
+  // Filter out PseudoPlaylist (Liked Songs sentinel — handled separately
+  // via /me/tracks). Keeps the result shape congruent with the public API.
+  if (data.__typename === 'PseudoPlaylist') return null
+  return {
+    id: idFromUri(data.uri),
+    name: data.name,
+    uri: data.uri,
+    description: null,
+    items: { total: data.count ?? 0, href: '' },
+    images: mapImages(data.image?.sources),
+    owner: { id: '' },
+    collaborative: false,
+    public: null,
+  }
+}
+
+// ---- fetchLibraryTracks (Liked Songs) ----------------------------------
+
+interface LibraryTracksPage {
+  totalCount?: number
+  items?: LibraryTrackItem[]
+}
+
+interface LibraryTrackItem {
+  addedAt?: { isoString?: string } | string
+  track?: {
+    _uri?: string
+    data?: PfTrack
+  }
+}
+
+async function libraryTracksViaPathfinder(
+  limit: number,
+  offset: number,
+): Promise<PageSlice<SavedTrack>> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const res = await fetch(`/api/proxy/library/tracks?${params}`)
+  if (!res.ok) throw new Error(`library tracks ${res.status}`)
+  const env = (await res.json()) as {
+    data?: { me?: { library?: { tracks?: LibraryTracksPage } } }
+  }
+  const page = env.data?.me?.library?.tracks
+  const items = (page?.items ?? []).flatMap((it) => {
+    const mapped = mapSavedTrack(it)
+    return mapped ? [mapped] : []
+  })
+  const total = page?.totalCount ?? items.length
+  return {
+    items,
+    nextPath: nextPath('/me/tracks', items.length, offset, total, limit),
+    total,
+  }
+}
+
+function mapSavedTrack(it: LibraryTrackItem): SavedTrack | null {
+  const wrapper = it.track
+  const data = wrapper?.data
+  if (!wrapper || !data) return null
+  const uri = wrapper._uri ?? data.uri
+  if (!uri) return null
+  const track = mapTrack({ ...data, uri })
+  if (!track) return null
+  return {
+    added_at:
+      typeof it.addedAt === 'string'
+        ? it.addedAt
+        : (it.addedAt?.isoString ?? ''),
+    track,
+  }
+}
+
+// ---- fetchPlaylist (playlist tracks) -----------------------------------
+
+interface PlaylistV2 {
+  name?: string
+  content?: PlaylistContentPage
+}
+
+interface PlaylistContentPage {
+  totalCount?: number
+  items?: PlaylistContentItem[]
+}
+
+interface PlaylistContentItem {
+  addedAt?: { isoString?: string } | string
+  uid?: string
+  itemV2?: {
+    _uri?: string
+    data?: PfTrack | PfEpisodePartial
+  }
+}
+
+interface PfEpisodePartial {
+  __typename?: string
+  uri?: string
+  name?: string
+  duration?: { totalMilliseconds?: number }
+}
+
+async function playlistTracksViaPathfinder(
+  playlistId: string,
+  limit: number,
+  offset: number,
+): Promise<PageSlice<PlaylistItem>> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const res = await fetch(
+    `/api/proxy/playlist/${encodeURIComponent(playlistId)}/items?${params}`,
+  )
+  if (!res.ok) throw new Error(`playlist items ${res.status}`)
+  const env = (await res.json()) as { data?: { playlistV2?: PlaylistV2 } }
+  const pl = env.data?.playlistV2
+  const items = (pl?.content?.items ?? []).flatMap((it) => {
+    const mapped = mapPlaylistItem(it)
+    return mapped ? [mapped] : []
+  })
+  const total = pl?.content?.totalCount ?? items.length
+  return {
+    items,
+    nextPath: nextPath(
+      `/playlists/${playlistId}/items`,
+      items.length,
+      offset,
+      total,
+      limit,
+    ),
+    total,
+  }
+}
+
+function mapPlaylistItem(it: PlaylistContentItem): PlaylistItem | null {
+  const wrapper = it.itemV2
+  const data = wrapper?.data
+  if (!wrapper || !data) return null
+  const uri = wrapper._uri ?? data.uri
+  if (!uri) return null
+  const typename = (data as { __typename?: string }).__typename
+  let item: Track | Episode | null = null
+  if (typename === 'Episode') {
+    item = mapEpisode(data as PfEpisodePartial)
+  } else {
+    item = mapTrack({ ...(data as PfTrack), uri })
+  }
+  if (!item) return null
+  return {
+    added_at:
+      typeof it.addedAt === 'string'
+        ? it.addedAt
+        : (it.addedAt?.isoString ?? ''),
+    item,
+  }
+}
+
+function mapEpisode(e: PfEpisodePartial): Episode | null {
+  if (!e.uri || !e.name) return null
+  return {
+    id: idFromUri(e.uri),
+    name: e.name,
+    uri: e.uri,
+    duration_ms: e.duration?.totalMilliseconds ?? 0,
+    type: 'episode',
+  }
 }

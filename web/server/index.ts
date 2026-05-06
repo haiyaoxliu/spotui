@@ -21,6 +21,7 @@ import {
   statusHandler,
   tokenHandler,
 } from './routes/auth.js'
+import { pathfinderHandler, searchHandler } from './routes/proxy.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
 
@@ -36,6 +37,8 @@ const ROUTES: Route[] = [
   { path: '/api/auth/paste', method: 'POST', handler: pasteHandler },
   { path: '/api/auth/clear', method: 'DELETE', handler: clearHandler },
   { path: '/api/auth/token', method: 'GET', handler: tokenHandler },
+  { path: '/api/proxy/pathfinder', method: 'POST', handler: pathfinderHandler },
+  { path: '/api/proxy/search', method: 'GET', handler: searchHandler },
 ]
 
 export function spotuiSidecar(): Plugin {
@@ -81,7 +84,11 @@ export function spotuiSidecar(): Plugin {
         res.end(JSON.stringify({ ok: true, name: 'spotui-sidecar' }))
       })
 
-      console.log('[spotui] sidecar mounted: /api/auth/{status,discover,paste,clear,token} + /api/health')
+      console.log(
+        '[spotui] sidecar mounted: ' +
+          '/api/auth/{status,discover,paste,clear,token} + ' +
+          '/api/proxy/{pathfinder,search} + /api/health',
+      )
     },
   }
 }

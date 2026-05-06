@@ -212,16 +212,45 @@ export async function refresh(): Promise<string> {
   return next.access_token
 }
 
+/** Bearer for `api.spotify.com/v1` calls. Prefers PKCE when available
+ *  because:
+ *    - PKCE bearers are issued under our private dev-app `client_id`,
+ *      which has its own rate-limit pool. The cookie-mint bearer is
+ *      issued under Spotify's Web Player `client_id` — a high-traffic,
+ *      heavily-monitored pool that 429s an account quickly under heavy
+ *      use. Splitting traffic by client_id is the only way to avoid the
+ *      Web Player pool's tighter limits.
+ *    - PKCE bearers have explicit OAuth scopes; the Web Player bearer's
+ *      scopes are implicit and sometimes narrower for /v1 endpoints.
+ *  Falls back to the cookie-mint bearer if no PKCE tokens are stored. */
 export async function getAccessToken(): Promise<string | null> {
-  if (cookieMode) return getCookieToken()
   const tokens = loadTokens()
-  if (!tokens) return null
-  if (Date.now() >= tokens.expires_at - 60_000) return refresh()
-  return tokens.access_token
+  if (tokens) {
+    if (Date.now() >= tokens.expires_at - 60_000) return refresh()
+    return tokens.access_token
+  }
+  if (cookieMode) return getCookieToken()
+  return null
+}
+
+/** Which bearer pool getAccessToken() will produce on the *next* call.
+ *  Lets `api/client.ts` route 401-retries to the right refresh path
+ *  (PKCE token rotation vs. cookie-mint re-mint). */
+export function tokenKind(): 'pkce' | 'cookie' | null {
+  if (loadTokens()) return 'pkce'
+  if (cookieMode) return 'cookie'
+  return null
+}
+
+/** True when PKCE tokens are persisted. UI uses this to gate the
+ *  "Connect Spotify dev app" affordance and to surface "/v1 via PKCE"
+ *  status. */
+export function hasPkce(): boolean {
+  return loadTokens() !== null
 }
 
 export function isLoggedIn(): boolean {
-  return cookieMode || loadTokens() !== null
+  return cookieMode || hasPkce()
 }
 
 export function logout(): void {

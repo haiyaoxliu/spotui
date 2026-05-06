@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { bootstrapAuth, handleCallback, login, logout } from './auth/auth'
+import { bootstrapAuth, handleCallback, hasPkce, login, logout } from './auth/auth'
 import { api } from './api/client'
 import { fetchMe } from './api/me'
 import { subscribeState } from './api/events'
@@ -64,9 +64,12 @@ export function App() {
         }
         const kind = await bootstrapAuth()
         if (kind === 'none') return
-        // Cookie mode → sidecar's cached /api/me (1 hit per dev-server
-        // lifetime). PKCE mode → public /v1/me with the OAuth bearer.
-        const data = kind === 'cookie' ? await fetchMe() : await api<Me>('/me')
+        // Bearer preference for /v1/me:
+        //   - PKCE if available — separate rate-limit pool from Spotify's
+        //     Web Player client_id (which the cookie-mint token uses).
+        //   - Otherwise, hit the sidecar's /api/me (cookie bearer with
+        //     www-profile fallback on 429 and a disk cache for restarts).
+        const data = hasPkce() ? await api<Me>('/me') : await fetchMe()
         if (!cancelled && data) {
           setMe(data)
           useUI.getState().setUserId(data.id)

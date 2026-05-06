@@ -7,7 +7,7 @@
 
 import { useEffect } from 'react'
 
-import { logout } from '../auth/auth'
+import { hasPkce, isCookieMode, login, logout } from '../auth/auth'
 import { useUI } from '../store/ui'
 
 export function ControlPane() {
@@ -115,6 +115,10 @@ export function ControlPane() {
             </button>
           </Section>
 
+          <Section label="Authentication">
+            <AuthStatusRows />
+          </Section>
+
           <Section label="Account">
             <button
               onClick={() => {
@@ -129,6 +133,56 @@ export function ControlPane() {
         </div>
       </aside>
     </>
+  )
+}
+
+/**
+ * Shows which auth pools are active and offers a PKCE bootstrap button.
+ *
+ * Cookie-mint tokens use Spotify's Web Player client_id, which shares a
+ * rate-limit pool with millions of open.spotify.com sessions and 429s
+ * easily. A PKCE bearer (private dev-app client_id) is on a separate
+ * pool — connecting it gives /v1 calls a quieter neighbor and acts as a
+ * fallback when cookie /v1/me is rate-limited.
+ */
+function AuthStatusRows() {
+  const cookie = isCookieMode()
+  const pkce = hasPkce()
+  const v1Source = pkce ? 'PKCE (dev app)' : cookie ? 'cookie (Web Player)' : 'none'
+  return (
+    <div className="space-y-2 text-xs">
+      <Row label="Cookie session" value={cookie ? 'active' : 'off'} ok={cookie} />
+      <Row label="PKCE bearer" value={pkce ? 'connected' : 'not connected'} ok={pkce} />
+      <Row label="/v1 calls go via" value={v1Source} ok={pkce || cookie} />
+      {!pkce && (
+        <button
+          onClick={() => {
+            void login()
+          }}
+          className="w-full text-left mt-2 px-3 py-2 rounded bg-neutral-200/60 hover:bg-neutral-200 dark:bg-neutral-800/60 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200"
+          title="Run the OAuth flow to get a private-client /v1 bearer (separate rate-limit pool)"
+        >
+          Connect Spotify dev app for /v1 fallback…
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Row({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-1">
+      <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
+      <span
+        className={
+          ok
+            ? 'text-green-700 dark:text-green-400'
+            : 'text-neutral-500 dark:text-neutral-500'
+        }
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 

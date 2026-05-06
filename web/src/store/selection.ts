@@ -9,7 +9,6 @@ import type {
 import {
   fetchPage,
   getAlbumTracks,
-  getPlaylistFirstSliceViaFull,
   getRecentlyPlayed,
   PLAYLIST_ITEMS_PAGE_PATH,
   SAVED_TRACKS_PAGE_PATH,
@@ -54,7 +53,7 @@ interface SelectionState {
   lastPlaylist: Playlist | null
   lastAlbum: SimplifiedAlbum | null
   prior: PriorSelection | null
-  selectPlaylist: (p: Playlist, canEdit: boolean, fromSearch?: boolean) => Promise<void>
+  selectPlaylist: (p: Playlist, canEdit: boolean) => Promise<void>
   selectAlbum: (a: SimplifiedAlbum) => Promise<void>
   selectLiked: () => Promise<void>
   selectRecent: () => Promise<void>
@@ -104,7 +103,7 @@ export const useSelection = create<SelectionState>((set, get) => {
     lastAlbum: null,
     prior: null,
 
-    selectPlaylist: async (p, canEdit, fromSearch = false) => {
+    selectPlaylist: async (p, canEdit) => {
       const prior = maybeCaptureprior()
       set({
         kind: 'playlist',
@@ -125,20 +124,15 @@ export const useSelection = create<SelectionState>((set, get) => {
         lastAlbum: null,
         prior,
       })
-      // Read-only playlists picked from SEARCH results are usually
-      // public/editorial picks the user doesn't follow — Spotify dev-mode
-      // 403s those even through the GET /playlists/{id} fallback. Skip the
-      // fetch and let the pane show the "API limitation" message. Library-
-      // sourced read-only picks (followed playlists, Discover Weekly when
-      // pinned) come through the fallback fine, so we still try those.
-      if (!canEdit && fromSearch) {
-        set({ loading: false })
-        return
-      }
+      // Pathfinder's fetchPlaylist works on every playlist regardless of
+      // ownership — including editorial / followed picks that 403 against
+      // the public Web API in dev mode. fetchPage routes through it
+      // automatically, so a single code path covers all four cases
+      // (canEdit × fromSearch). The legacy GET /playlists/{id} fallback
+      // is kept as a safety net inside fetchPage's catch path but is
+      // unreachable for these reads now.
       try {
-        const slice = canEdit
-          ? await fetchPage<PlaylistItem>(PLAYLIST_ITEMS_PAGE_PATH(p.id))
-          : await getPlaylistFirstSliceViaFull(p.id)
+        const slice = await fetchPage<PlaylistItem>(PLAYLIST_ITEMS_PAGE_PATH(p.id))
         const tracks = slice.items
           .map((i: PlaylistItem) => i.item ?? i.track ?? null)
           .filter((t): t is Track => !!t && t.type === 'track')

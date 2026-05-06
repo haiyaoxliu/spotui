@@ -48,7 +48,6 @@ export function SelectedPlaylist({
   const tracks = useSelection((s) => s.tracks)
   const loading = useSelection((s) => s.loading)
   const error = useSelection((s) => s.error)
-  const canEditSelection = useSelection((s) => s.canEdit)
   const tracksNextPath = useSelection((s) => s.tracksNextPath)
   const loadingMoreTracks = useSelection((s) => s.loadingMoreTracks)
   const loadMoreTracks = useSelection((s) => s.loadMoreTracks)
@@ -170,11 +169,7 @@ export function SelectedPlaylist({
           {error && <p className="px-6 py-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
           {!loading && !error && filteredTracks.length === 0 && (
             <p className="px-6 py-4 text-sm text-neutral-600 dark:text-neutral-500">
-              {kind === 'playlist' && !canEditSelection && tracks.length === 0
-                ? 'Externally owned — cannot show tracks due to API limitation.'
-                : hasQuery
-                  ? 'No tracks match.'
-                  : 'No tracks.'}
+              {hasQuery ? 'No tracks match.' : 'No tracks.'}
             </p>
           )}
           {filteredTracks.length > 0 && (
@@ -366,7 +361,7 @@ export function SelectedPlaylist({
                     // an "API limitation" message for read-only). Double-
                     // click (or Enter) starts playback in the playlist's
                     // context regardless of ownership.
-                    onSelect: () => void selectPlaylist(p, canEdit, true),
+                    onSelect: () => void selectPlaylist(p, canEdit),
                     onPlay: () => void playContext(p.uri, onAfterPlay),
                   }
                 }}

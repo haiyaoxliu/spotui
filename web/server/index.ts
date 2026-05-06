@@ -32,6 +32,7 @@ import {
   connectShuffleHandler,
   connectTransferHandler,
   connectVolumeHandler,
+  friendsHandler,
   libraryAlbumsHandler,
   libraryPlaylistsHandler,
   libraryTracksHandler,
@@ -74,6 +75,7 @@ const ROUTES: Route[] = [
   { path: '/api/proxy/connect/repeat', method: 'POST', handler: connectRepeatHandler },
   { path: '/api/proxy/connect/queue', method: 'POST', handler: connectQueueHandler },
   { path: '/api/proxy/connect/transfer', method: 'POST', handler: connectTransferHandler },
+  { path: '/api/proxy/friends', method: 'GET', handler: friendsHandler },
 ]
 
 export function spotuiSidecar(): Plugin {

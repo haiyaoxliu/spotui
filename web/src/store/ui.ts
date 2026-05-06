@@ -111,6 +111,11 @@ interface UIState {
   openControlPane: () => void
   closeControlPane: () => void
   toggleControlPane: () => void
+  // Friend activity overlay (cookie-only feature). Toggle with `f`.
+  friendsOpen: boolean
+  openFriends: () => void
+  closeFriends: () => void
+  toggleFriends: () => void
   // Theme + per-theme color profiles. The active --color-accent and
   // --color-external CSS vars always reflect the current theme's pair, so
   // consumers don't care which profile produced them.
@@ -165,6 +170,10 @@ export const useUI = create<UIState>((set, get) => ({
   openControlPane: () => set({ controlPaneOpen: true }),
   closeControlPane: () => set({ controlPaneOpen: false }),
   toggleControlPane: () => set((s) => ({ controlPaneOpen: !s.controlPaneOpen })),
+  friendsOpen: false,
+  openFriends: () => set({ friendsOpen: true }),
+  closeFriends: () => set({ friendsOpen: false }),
+  toggleFriends: () => set((s) => ({ friendsOpen: !s.friendsOpen })),
   theme: initialTheme,
   setTheme: (t) => {
     localStorage.setItem(THEME_KEY, t)

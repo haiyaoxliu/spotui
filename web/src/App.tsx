@@ -29,6 +29,7 @@ import { TransportBar } from './components/TransportBar'
 import { ColorPicker } from './components/ColorPicker'
 import { ControlPane } from './components/ControlPane'
 import { DevicePicker } from './components/DevicePicker'
+import { FriendsOverlay } from './components/FriendsOverlay'
 import { HelpOverlay } from './components/HelpOverlay'
 import { LibraryPanel } from './components/LibraryPanel'
 import { SelectedPlaylist } from './components/SelectedPlaylist'
@@ -133,6 +134,8 @@ function Player({ me }: { me: Me }) {
   const openColorPicker = useUI((s) => s.openColorPicker)
   const colorPickerOpen = useUI((s) => s.colorPickerOpen)
   const toggleControlPane = useUI((s) => s.toggleControlPane)
+  const toggleFriends = useUI((s) => s.toggleFriends)
+  const friendsOpen = useUI((s) => s.friendsOpen)
   const focusSearch = useUI((s) => s.focusSearch)
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
@@ -211,7 +214,7 @@ function Player({ me }: { me: Me }) {
     function onKey(e: KeyboardEvent) {
       const target = e.target as Element | null
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
-      if (devicePickerOpen || helpOpen || colorPickerOpen) return
+      if (devicePickerOpen || helpOpen || colorPickerOpen || friendsOpen) return
       // Don't intercept browser shortcuts. Plain shift is fine — '?' and
       // '+' are reachable as shifted characters and we want those to work.
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -298,6 +301,10 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           toggleControlPane()
           break
+        case 'f':
+          e.preventDefault()
+          toggleFriends()
+          break
         case 'b':
           e.preventDefault()
           void goBack()
@@ -310,10 +317,12 @@ function Player({ me }: { me: Me }) {
     devicePickerOpen,
     helpOpen,
     colorPickerOpen,
+    friendsOpen,
     openDevicePicker,
     openHelp,
     openColorPicker,
     toggleControlPane,
+    toggleFriends,
     focusSearch,
     goBack,
     refresh,
@@ -326,6 +335,7 @@ function Player({ me }: { me: Me }) {
         onOpenDevices={openDevicePicker}
         onOpenHelp={openHelp}
         onToggleControls={toggleControlPane}
+        onToggleFriends={toggleFriends}
       />
       <main className="flex-1 overflow-hidden flex">
         <LibraryPanel ownerId={me.id} onAfterAction={() => void refresh()} />
@@ -346,6 +356,7 @@ function Player({ me }: { me: Me }) {
       <HelpOverlay />
       <ColorPicker />
       <ControlPane />
+      <FriendsOverlay />
     </div>
   )
 }
@@ -360,11 +371,13 @@ function ConsoleBar({
   onOpenDevices,
   onOpenHelp,
   onToggleControls,
+  onToggleFriends,
 }: {
   me: Me
   onOpenDevices: () => void
   onOpenHelp: () => void
   onToggleControls: () => void
+  onToggleFriends: () => void
 }) {
   const playback = usePlayer((s) => s.playback)
   const itemName =
@@ -401,6 +414,13 @@ function ConsoleBar({
         )}
       </span>
       <div className="flex items-center gap-1">
+        <ConsoleButton
+          onClick={onToggleFriends}
+          title="Friend activity (f)"
+          aria-label="Friend activity"
+        >
+          ⚇
+        </ConsoleButton>
         <ConsoleButton onClick={onOpenDevices} title="Devices (d)">
           d
         </ConsoleButton>

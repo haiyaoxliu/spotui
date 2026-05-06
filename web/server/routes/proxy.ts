@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { discoverCookies, type CookieReadResult } from '../cookies/index.js'
 import { hasSpDc } from '../cookies/types.js'
 import { readFileCookies } from '../cookies/file.js'
+import { fetchBuddylist } from '../spotify/buddylist.js'
 import { connectClient } from '../spotify/connect.js'
 import { getDealer, type DealerEvent } from '../spotify/dealer.js'
 import { fetchLyrics, LyricsNotFoundError } from '../spotify/lyrics.js'
@@ -314,6 +315,23 @@ export const connectTransferHandler = connectWriteHandler<{
   },
   (read, { deviceId, play }) => connectClient.transfer(read, deviceId, play),
 )
+
+/** GET /api/proxy/friends
+ *  Recent listening activity for the user's followed friends. Cookie-path
+ *  only; no public Web API equivalent. */
+export async function friendsHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await fetchBuddylist(read)
+    json(res, 200, payload)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
 
 /** GET /api/proxy/lyrics/:trackId
  *  Returns spclient color-lyrics payload, or 404 when Spotify has no

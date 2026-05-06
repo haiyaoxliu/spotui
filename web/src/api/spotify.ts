@@ -183,27 +183,6 @@ export async function fetchPage<T>(path: string): Promise<PageSlice<T>> {
 
 export const PLAYLISTS_PAGE_PATH = '/me/playlists?limit=50'
 
-// Fallback for non-owned/collab playlists: GET /playlists/{id} (spec line
-// 848) has no ownership restriction and returns a full PlaylistObject with
-// embedded paged items. Returns the first slice; subsequent pages use the
-// returned nextPath via fetchPage<PlaylistItem> like a normal paged route.
-export async function getPlaylistFirstSliceViaFull(
-  playlistId: string,
-): Promise<PageSlice<PlaylistItem>> {
-  const full = await api<{ items?: Page<PlaylistItem> | null }>(
-    `/playlists/${playlistId}`,
-  )
-  const firstPage = full?.items
-  if (!firstPage) return { items: [], nextPath: null, total: null }
-  return {
-    items: firstPage.items,
-    nextPath: firstPage.next
-      ? firstPage.next.replace('https://api.spotify.com/v1', '')
-      : null,
-    total: typeof firstPage.total === 'number' ? firstPage.total : null,
-  }
-}
-
 export const PLAYLIST_ITEMS_PAGE_PATH = (id: string) =>
   `/playlists/${id}/items?limit=100`
 export const SAVED_TRACKS_PAGE_PATH = '/me/tracks?limit=50'

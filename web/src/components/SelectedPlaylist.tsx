@@ -357,10 +357,9 @@ export function SelectedPlaylist({
                     isTrack: false,
                     title: p.name,
                     subtitle: p.owner.display_name ?? '',
-                    // Single-click loads into the pane (tracks for owned;
-                    // an "API limitation" message for read-only). Double-
-                    // click (or Enter) starts playback in the playlist's
-                    // context regardless of ownership.
+                    // Single-click loads tracks into the pane (cookie path
+                    // serves owned + editorial alike). Double-click (or
+                    // Enter) starts playback in the playlist's context.
                     onSelect: () => void selectPlaylist(p, canEdit),
                     onPlay: () => void playContext(p.uri, onAfterPlay),
                   }

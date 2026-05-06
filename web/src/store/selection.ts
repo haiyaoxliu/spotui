@@ -124,13 +124,10 @@ export const useSelection = create<SelectionState>((set, get) => {
         lastAlbum: null,
         prior,
       })
-      // Pathfinder's fetchPlaylist works on every playlist regardless of
-      // ownership — including editorial / followed picks that 403 against
-      // the public Web API in dev mode. fetchPage routes through it
-      // automatically, so a single code path covers all four cases
-      // (canEdit × fromSearch). The legacy GET /playlists/{id} fallback
-      // is kept as a safety net inside fetchPage's catch path but is
-      // unreachable for these reads now.
+      // Pathfinder's fetchPlaylist (via fetchPage) works on every playlist
+      // regardless of ownership — including editorial / followed picks
+      // that 403 against the public Web API in dev mode. One code path
+      // for all callers; canEdit is now used purely to gate write ops.
       try {
         const slice = await fetchPage<PlaylistItem>(PLAYLIST_ITEMS_PAGE_PATH(p.id))
         const tracks = slice.items

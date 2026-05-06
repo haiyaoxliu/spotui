@@ -153,6 +153,13 @@ interface RawDevice {
   is_active_device?: boolean
   is_private_session?: boolean
   volume?: number | string
+  /** Connect-state device capability map. We read `disable_volume` here —
+   *  iOS reports `disable_volume: true` because PUT /me/player/volume
+   *  silently 403s on those devices. The public Web API surfaces the same
+   *  state as `supports_volume: false` + `volume_percent: null`. */
+  capabilities?: {
+    disable_volume?: boolean
+  }
 }
 
 export interface ClusterSnapshot {
@@ -200,16 +207,19 @@ function mapDevices(cluster: RawCluster): Device[] {
   const out: Device[] = []
   for (const [id, raw] of Object.entries(map)) {
     const isActive = id === activeId
+    const supportsVolume = raw.capabilities?.disable_volume !== true
     out.push({
       id,
       name: raw.name ?? '',
       type: (raw.device_type ?? '').toLowerCase(),
-      // Connect-state volume is a 0..65535 short; convert to 0..100 percent.
-      volume_percent: volumeToPercent(raw.volume),
+      // Devices with disable_volume still report a `volume` value (often
+      // 65535) but it's meaningless. Mirror the public Web API which
+      // returns volume_percent: null on supports_volume: false devices.
+      volume_percent: supportsVolume ? volumeToPercent(raw.volume) : null,
       is_active: isActive || !!raw.is_active || !!raw.is_active_device,
       is_restricted: false,
       is_private_session: !!raw.is_private_session,
-      supports_volume: true,
+      supports_volume: supportsVolume,
     })
   }
   return out

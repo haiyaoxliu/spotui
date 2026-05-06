@@ -259,10 +259,12 @@ export interface SearchResults {
 
 export type SearchTab = 'tracks' | 'albums' | 'artists' | 'playlists'
 
-// Per-tab page size on the cookie path. Pathfinder doesn't enforce the
-// dev-mode 10-cap, but we keep the same default for visual parity. Bumping
-// here gives all four tabs more rows in one shot.
-const SEARCH_LIMIT = 10
+// Per-tab page size for the cookie/Pathfinder path. 50 is the actual hard
+// cap searchDesktop returns — asking for more is silently clamped. The
+// public Web API used to cap at 10 in dev mode; that constraint no longer
+// applies. Bumping to 50 fills four tabs (200 rows total) on first response
+// and keeps loadMore at the same step size.
+const SEARCH_LIMIT = 50
 
 export async function search(q: string): Promise<SearchResults> {
   const trimmed = q.trim()

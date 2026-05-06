@@ -158,7 +158,21 @@ export async function searchMoreViaPathfinder(
   const results = await searchViaPathfinder(q, limit, offset)
   const slice = results[tab]
   if (!slice) return null
-  return { tab, slice }
+
+  // Synthesize the *next* page's URL if more results remain. Without this
+  // the store's loadMore would fire once and stop, capping pagination at
+  // the second page (offset+limit, i.e. 20 with the default limit=10).
+  const fetched = slice.items.length
+  const nextOffset = offset + fetched
+  const sliceWithNext = {
+    ...slice,
+    next:
+      fetched > 0 && nextOffset < slice.total
+        ? buildPathfinderNextUrl(q, tab, nextOffset, limit)
+        : null,
+  } as NonNullable<SearchResults[SearchTab]>
+
+  return { tab, slice: sliceWithNext }
 }
 
 function adaptSearchV2(sv: PathfinderSearchV2 | undefined): SearchResults {

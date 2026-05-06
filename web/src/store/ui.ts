@@ -41,6 +41,17 @@ const ACCENT_LIGHT_KEY = 'ui_accent_color_light'
 const EXTERNAL_DARK_KEY = 'ui_external_color_dark'
 const EXTERNAL_LIGHT_KEY = 'ui_external_color_light'
 
+export type ConsoleLevel = 'info' | 'warn' | 'error'
+export interface ConsoleMessage {
+  // Monotonic id so identical text shown twice still triggers a fresh
+  // render + dismiss-timer reset in the consumer component.
+  id: number
+  text: string
+  level: ConsoleLevel
+  at: number
+}
+let consoleMessageSeq = 0
+
 // Per-theme defaults — colors that read well on each background.
 export const DEFAULT_ACCENT_DARK = '#4ade80'
 export const DEFAULT_ACCENT_LIGHT = '#16a34a'
@@ -147,6 +158,14 @@ interface UIState {
   // collaborative) without prop-drilling from App.
   userId: string | null
   setUserId: (id: string | null) => void
+  // Transient status message rendered in the top console bar. Used to
+  // surface fallback events (Pathfinder→/v1, /v1/me 429→www profile),
+  // sidecar errors, and other operational notices that the user should
+  // know about. The component owns auto-dismiss; the store just holds the
+  // latest message until cleared.
+  consoleMessage: ConsoleMessage | null
+  pushConsoleMessage: (text: string, level?: ConsoleLevel) => void
+  clearConsoleMessage: () => void
   // Layout prefs (persisted to localStorage).
   transportPosition: TransportPosition
   searchPosition: SearchPosition
@@ -252,6 +271,14 @@ export const useUI = create<UIState>((set, get) => ({
   setFocusedRow: (focusedRow) => set({ focusedRow }),
   userId: null,
   setUserId: (userId) => set({ userId }),
+  consoleMessage: null,
+  pushConsoleMessage: (text, level = 'info') => {
+    consoleMessageSeq += 1
+    set({
+      consoleMessage: { id: consoleMessageSeq, text, level, at: Date.now() },
+    })
+  },
+  clearConsoleMessage: () => set({ consoleMessage: null }),
   transportPosition: readTransport(),
   searchPosition: readSearch(),
   detailLayout: readDetail(),

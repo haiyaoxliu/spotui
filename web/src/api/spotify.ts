@@ -1,5 +1,6 @@
 import { api } from './client'
 import { isCookieMode } from '../auth/auth'
+import { notify } from '../console'
 import { fetchClusterSnapshot } from './state'
 import {
   connectNext,
@@ -97,6 +98,7 @@ export async function getPlaybackState(): Promise<PlaybackState | null> {
     try {
       return (await fetchClusterSnapshot()).playback
     } catch (e) {
+      notify('connect-state snapshot failed; falling back to /v1/me/player', 'warn')
       console.warn('[spotui] connect-state snapshot failed, falling back:', e)
     }
   }
@@ -108,6 +110,7 @@ export async function getQueue(): Promise<Queue | null> {
     try {
       return (await fetchClusterSnapshot()).queue
     } catch (e) {
+      notify('connect-state queue failed; falling back to /v1/me/player/queue', 'warn')
       console.warn('[spotui] connect-state queue failed, falling back:', e)
     }
   }
@@ -209,6 +212,7 @@ export async function fetchPage<T>(path: string): Promise<PageSlice<T>> {
       if (slice) return slice
     } catch (e) {
       if (!isRetryablePathfinderError(e)) throw e
+      notify(`pathfinder ${path} rate-limited; falling back to /v1`, 'warn')
       console.warn('[spotui] pathfinder fetchPage rate-limited/transport, falling back:', e)
     }
   }
@@ -245,6 +249,7 @@ export async function getAlbumTracks(albumId: string, max = 200): Promise<Simpli
     try {
       return await fetchAlbumTracksViaPathfinder(albumId, max)
     } catch (e) {
+      notify('pathfinder getAlbum failed; falling back to /v1/albums/.../tracks', 'warn')
       console.warn('[spotui] pathfinder getAlbum failed, falling back:', e)
     }
   }
@@ -313,6 +318,7 @@ export async function search(q: string): Promise<SearchResults> {
       return synthesizeNexts(trimmed, pf)
     } catch (e) {
       if (!isRetryablePathfinderError(e)) throw e
+      notify('pathfinder search rate-limited; falling back to /v1/search', 'warn')
       console.warn('[spotui] pathfinder search rate-limited/transport, falling back:', e)
     }
   }
@@ -337,6 +343,7 @@ export async function searchMore<K extends SearchTab>(
       return result.slice as SearchResults[K]
     } catch (e) {
       if (!isRetryablePathfinderError(e)) throw e
+      notify('pathfinder searchMore rate-limited; falling back to /v1', 'warn')
       console.warn('[spotui] pathfinder searchMore rate-limited/transport, falling back:', e)
       // Can't translate a synthetic URL into a public-API URL, so fall
       // through to a fresh public-API page as a best-effort backstop.
@@ -390,6 +397,7 @@ export async function getDevices(): Promise<Device[]> {
     try {
       return (await fetchClusterSnapshot()).devices
     } catch (e) {
+      notify('connect-state devices failed; falling back to /v1/me/player/devices', 'warn')
       console.warn('[spotui] connect-state devices failed, falling back:', e)
     }
   }
@@ -593,6 +601,7 @@ export async function addItemsToPlaylist(
       await addToPlaylistViaPathfinder(playlistId, uris)
       return
     } catch (e) {
+      notify('pathfinder addToPlaylist failed; falling back to /v1', 'warn')
       console.warn('[spotui] pathfinder addToPlaylist failed, falling back:', e)
     }
   }

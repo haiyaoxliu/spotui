@@ -397,15 +397,6 @@ function ConsoleBar({
   onToggleFriends: () => void
   onToggleJam: () => void
 }) {
-  const playback = usePlayer((s) => s.playback)
-  const itemName =
-    playback?.item?.name ??
-    (playback?.is_playing ? 'Playing' : null)
-  const itemSub =
-    playback?.item?.type === 'track'
-      ? playback.item.artists.map((a) => a.name).join(', ')
-      : ''
-
   return (
     <header className="h-9 px-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center gap-3 text-xs bg-neutral-50/80 dark:bg-neutral-950/40 backdrop-blur">
       <span className="font-mono text-neutral-500 select-none">spotui</span>
@@ -418,19 +409,7 @@ function ConsoleBar({
           </span>
         )}
       </span>
-      <span className="flex-1 min-w-0 truncate text-neutral-500 dark:text-neutral-500">
-        {itemName && (
-          <>
-            <span className="text-neutral-400 dark:text-neutral-600 mr-2">▸</span>
-            <span className="text-neutral-700 dark:text-neutral-300">
-              {itemName}
-            </span>
-            {itemSub && (
-              <span className="ml-2 text-neutral-500">— {itemSub}</span>
-            )}
-          </>
-        )}
-      </span>
+      <ConsoleStatus />
       <div className="flex items-center gap-1">
         <ConsoleButton
           onClick={onToggleFriends}
@@ -461,6 +440,45 @@ function ConsoleBar({
         </ConsoleButton>
       </div>
     </header>
+  )
+}
+
+/**
+ * Renders the latest sidecar/operational status message in the top bar.
+ * Subscribes to the UI store, auto-dismisses after a level-dependent
+ * timeout, and resets the timer whenever a fresh message id arrives so
+ * back-to-back warnings each get their own visible window.
+ */
+function ConsoleStatus(): React.JSX.Element {
+  const message = useUI((s) => s.consoleMessage)
+  const clear = useUI((s) => s.clearConsoleMessage)
+
+  useEffect(() => {
+    if (!message) return
+    const ms = message.level === 'error' ? 12_000 : 6_000
+    const t = setTimeout(() => clear(), ms)
+    return () => clearTimeout(t)
+    // Re-arm on every new message via id (text alone wouldn't reset for
+    // duplicate messages, and resetting on `at` would couple the visible
+    // duration to wall-clock changes inside the same message).
+  }, [message?.id, message?.level, clear])
+
+  // Always reserve the flex-1 column so action buttons stay right-aligned
+  // whether or not a message is currently visible.
+  if (!message) return <span className="flex-1" />
+  const tone =
+    message.level === 'error'
+      ? 'text-red-600 dark:text-red-400'
+      : message.level === 'warn'
+        ? 'text-yellow-700 dark:text-yellow-400'
+        : 'text-neutral-600 dark:text-neutral-400'
+  const glyph =
+    message.level === 'error' ? '✗' : message.level === 'warn' ? '!' : 'i'
+  return (
+    <span className={`flex-1 min-w-0 truncate ${tone}`} title={message.text}>
+      <span className="mr-2 opacity-70">{glyph}</span>
+      {message.text}
+    </span>
   )
 }
 

@@ -25,9 +25,20 @@ import os from 'node:os'
 import path from 'node:path'
 
 import type { CookieReadResult } from '../cookies/index.js'
+import { toCookieHeader } from '../cookies/types.js'
 import { getToken } from './token.js'
 
 const ME_URL = 'https://api.spotify.com/v1/me'
+/**
+ * Cookie-only fallback that lives on www.spotify.com (separate rate-limit
+ * plane from api.spotify.com). Returns
+ * `{ profile: { username, email, country, ... } }`. We use it when /v1/me
+ * 429s during initial setup so boot can complete with a degraded profile
+ * (no display_name, no product). Once /v1/me succeeds even once, the disk
+ * cache means we never hit either path again.
+ */
+const PROFILE_FALLBACK_URL =
+  'https://www.spotify.com/api/account-settings/v1/profile'
 const ME_FILE = path.join(
   os.homedir(),
   'Library',
@@ -43,6 +54,11 @@ export interface MeProfile {
   email?: string
   product: 'premium' | 'free' | 'open'
   country?: string
+  /** Set to 'www-fallback' when /v1/me 429'd and we sourced the profile
+   *  from www.spotify.com instead. Lets the SPA surface a warning so the
+   *  user knows display_name + product are degraded. Absent on /v1/me
+   *  responses and on disk-cached entries (which always come from /v1). */
+  _source?: 'www-fallback'
 }
 
 export class MeRateLimitedError extends Error {
@@ -57,8 +73,8 @@ let diskLoaded = false
 let rateLimitedUntil = 0
 
 /** Returns the cached profile when one exists; otherwise tries disk;
- *  otherwise calls /v1/me. Throws MeRateLimitedError if /v1/me recently
- *  429'd and the cooldown is still active. */
+ *  otherwise calls /v1/me; if /v1/me 429s, falls back to the www profile
+ *  endpoint so boot can still complete with a degraded shape. */
 export async function getMe(read: CookieReadResult): Promise<MeProfile> {
   if (memCache) return memCache
   if (!diskLoaded) {
@@ -69,16 +85,27 @@ export async function getMe(read: CookieReadResult): Promise<MeProfile> {
       return memCache
     }
   }
-  if (Date.now() < rateLimitedUntil) {
-    throw new MeRateLimitedError(rateLimitedUntil - Date.now())
+  // Skip /v1/me while the cooldown is active — go straight to the www
+  // fallback so a refresh doesn't extend Spotify's lockout.
+  if (Date.now() >= rateLimitedUntil) {
+    try {
+      const fresh = await mintFromApi(read)
+      memCache = fresh
+      void writeDisk(fresh).catch((err) => {
+        console.warn('[spotui] failed to persist me.json:', err)
+      })
+      return fresh
+    } catch (e) {
+      if (!(e instanceof MeRateLimitedError)) throw e
+    }
   }
-  const fresh = await mintFromApi(read)
-  memCache = fresh
-  // Fire-and-forget — disk failure shouldn't break boot.
-  void writeDisk(fresh).catch((err) => {
-    console.warn('[spotui] failed to persist me.json:', err)
-  })
-  return fresh
+  // /v1/me is rate-limited (or just got rate-limited). Fall back to the
+  // www endpoint, which lives on a different rate-limit plane.
+  const fromWww = await fetchFromWww(read)
+  memCache = fromWww
+  // Don't persist the www result to disk — it's missing display_name and
+  // product. Next run will retry /v1/me to get the full record.
+  return fromWww
 }
 
 export function clearMeCache(): void {
@@ -104,6 +131,47 @@ async function mintFromApi(read: CookieReadResult): Promise<MeProfile> {
     throw new Error(`/v1/me ${res.status}: ${truncate(body)}`)
   }
   return (await res.json()) as MeProfile
+}
+
+interface WwwProfileResponse {
+  profile?: {
+    username?: string
+    email?: string
+    country?: string
+  }
+}
+
+/** Fetches the user's profile from www.spotify.com using the sp_dc cookie.
+ *  Used when /v1/me is rate-limited. The shape is narrower than /v1/me —
+ *  no display_name, no product. We synthesize a display_name from the
+ *  email local-part (or the username) and default product to 'open'. */
+async function fetchFromWww(read: CookieReadResult): Promise<MeProfile> {
+  const res = await fetch(PROFILE_FALLBACK_URL, {
+    headers: {
+      Accept: 'application/json',
+      Cookie: toCookieHeader(read.cookies),
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    },
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`www profile ${res.status}: ${truncate(body)}`)
+  }
+  const payload = (await res.json()) as WwwProfileResponse
+  const username = payload.profile?.username
+  if (!username) {
+    throw new Error('www profile response missing username')
+  }
+  const display = payload.profile?.email?.split('@')[0] || username
+  return {
+    id: username,
+    display_name: display,
+    email: payload.profile?.email,
+    product: 'open',
+    country: payload.profile?.country,
+    _source: 'www-fallback',
+  }
 }
 
 async function readDisk(): Promise<MeProfile | null> {

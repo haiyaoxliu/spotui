@@ -1,4 +1,10 @@
 import { api } from './client'
+import {
+  buildPathfinderNextUrl,
+  isPathfinderNextUrl,
+  searchMoreViaPathfinder,
+  searchViaPathfinder,
+} from './pathfinder'
 
 export interface SpotifyImage {
   url: string
@@ -246,10 +252,22 @@ export interface SearchResults {
 
 export type SearchTab = 'tracks' | 'albums' | 'artists' | 'playlists'
 
+// Per-tab page size on the cookie path. Pathfinder doesn't enforce the
+// dev-mode 10-cap, but we keep the same default for visual parity. Bumping
+// here gives all four tabs more rows in one shot.
+const SEARCH_LIMIT = 10
+
 export async function search(q: string): Promise<SearchResults> {
   const trimmed = q.trim()
   if (!trimmed) return {}
-  // Spec line 789: max limit per type is 10.
+  // Cookie/Pathfinder path first; public Web API fallback if the sidecar
+  // is unreachable or Spotify rejected our cookie.
+  try {
+    const pf = await searchViaPathfinder(trimmed, SEARCH_LIMIT, 0)
+    return synthesizeNexts(trimmed, pf)
+  } catch (e) {
+    console.warn('[spotui] pathfinder search failed, falling back:', e)
+  }
   const params = new URLSearchParams({
     q: trimmed,
     type: 'track,album,artist,playlist',
@@ -259,11 +277,22 @@ export async function search(q: string): Promise<SearchResults> {
   return res ?? {}
 }
 
-// Follow a per-type next URL returned by the initial /search call. Returns
-// just the slice for that tab — items + the new next URL + total.
+// Follow a per-type next URL — either a Pathfinder synthetic
+// (`pathfinder:search?...`) or a real Spotify Web API URL.
 export async function searchMore<K extends SearchTab>(
   nextUrl: string,
 ): Promise<SearchResults[K] | null> {
+  if (isPathfinderNextUrl(nextUrl)) {
+    try {
+      const result = await searchMoreViaPathfinder(nextUrl)
+      if (!result) return null
+      return result.slice as SearchResults[K]
+    } catch (e) {
+      console.warn('[spotui] pathfinder searchMore failed, falling back:', e)
+      // Can't translate a synthetic URL into a public-API URL, so fall
+      // through to a fresh public-API page as a best-effort backstop.
+    }
+  }
   const path = nextUrl.replace('https://api.spotify.com/v1', '')
   const res = await api<SearchResults>(path)
   if (!res) return null
@@ -272,6 +301,39 @@ export async function searchMore<K extends SearchTab>(
     if (res[k]) return res[k] as SearchResults[K]
   }
   return null
+}
+
+/** Pathfinder doesn't return next URLs — it's offset-based. We synthesize
+ *  per-tab next URLs so the existing `searchMore` flow keeps working. */
+function synthesizeNexts(q: string, results: SearchResults): SearchResults {
+  const out: SearchResults = {}
+  if (results.tracks) {
+    out.tracks = withNext(results.tracks, q, 'tracks', SEARCH_LIMIT)
+  }
+  if (results.albums) {
+    out.albums = withNext(results.albums, q, 'albums', SEARCH_LIMIT)
+  }
+  if (results.artists) {
+    out.artists = withNext(results.artists, q, 'artists', SEARCH_LIMIT)
+  }
+  if (results.playlists) {
+    out.playlists = withNext(results.playlists, q, 'playlists', SEARCH_LIMIT)
+  }
+  return out
+}
+
+function withNext<T extends { items: unknown[]; total: number; next?: string | null }>(
+  slice: T,
+  q: string,
+  tab: SearchTab,
+  limit: number,
+): T {
+  const fetched = slice.items.length
+  const next =
+    fetched > 0 && fetched < slice.total
+      ? buildPathfinderNextUrl(q, tab, fetched, limit)
+      : null
+  return { ...slice, next }
 }
 
 export async function getDevices(): Promise<Device[]> {

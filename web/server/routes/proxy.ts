@@ -8,6 +8,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { discoverCookies, type CookieReadResult } from '../cookies/index.js'
 import { hasSpDc } from '../cookies/types.js'
 import { readFileCookies } from '../cookies/file.js'
+import { getDealer, type DealerEvent } from '../spotify/dealer.js'
+import { fetchLyrics, LyricsNotFoundError } from '../spotify/lyrics.js'
 import {
   fetchLibraryTracksVariables,
   fetchPlaylistVariables,
@@ -167,6 +169,87 @@ export async function playlistTracksHandler(
   } catch (e) {
     error(res, 502, errMsg(e))
   }
+}
+
+/** GET /api/proxy/lyrics/:trackId
+ *  Returns spclient color-lyrics payload, or 404 when Spotify has no
+ *  lyrics for that track. Mounted at the `/api/proxy/lyrics` prefix. */
+export async function lyricsHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://_')
+  const m = url.pathname.match(/^\/([A-Za-z0-9]+)$/)
+  if (!m) return error(res, 404, 'expected /api/proxy/lyrics/:trackId')
+  const trackId = m[1]
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await fetchLyrics(read, trackId)
+    json(res, 200, payload)
+  } catch (e) {
+    if (e instanceof LyricsNotFoundError) {
+      json(res, 404, { error: 'no lyrics for this track' })
+      return
+    }
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** GET /api/proxy/state/stream
+ *  Server-Sent Events: emits a tick whenever Spotify pushes anything via
+ *  dealer. SPA listens with EventSource and refetches state on each tick. */
+export async function stateStreamHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  res.statusCode = 200
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
+  res.setHeader('Connection', 'keep-alive')
+  // Vite proxies dev requests through HTTP/1.1 with chunked encoding;
+  // explicit flushHeaders() makes sure the response gets to the client
+  // before the first event.
+  res.flushHeaders?.()
+
+  const dealer = getDealer()
+  const send = (event: string, data: unknown): void => {
+    if (res.writableEnded) return
+    res.write(`event: ${event}\n`)
+    res.write(`data: ${JSON.stringify(data)}\n\n`)
+  }
+
+  send('hello', { connected: dealer.isConnected() })
+
+  const onEvent = (e: DealerEvent): void => {
+    // Don't push pure transport noise (open/close/connection_id) to SPA;
+    // SPA only needs the "refetch now" signal. Filter to actual content
+    // messages.
+    if (e.kind === 'message') {
+      send('tick', { at: Date.now(), kind: e.kind })
+    } else if (e.kind === 'open') {
+      send('open', { at: Date.now() })
+    } else if (e.kind === 'close') {
+      send('close', { at: Date.now() })
+    }
+  }
+  const unsubscribe = dealer.subscribe(onEvent)
+
+  // Heartbeat comment every 20s to keep the browser from timing out the
+  // SSE connection while idle.
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded) return
+    res.write(`: heartbeat\n\n`)
+  }, 20_000)
+  heartbeat.unref?.()
+
+  const cleanup = (): void => {
+    clearInterval(heartbeat)
+    unsubscribe()
+    if (!res.writableEnded) res.end()
+  }
+  req.on('close', cleanup)
+  req.on('error', cleanup)
 }
 
 // ---- helpers -----------------------------------------------------------

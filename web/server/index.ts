@@ -25,9 +25,11 @@ import {
   libraryAlbumsHandler,
   libraryPlaylistsHandler,
   libraryTracksHandler,
+  lyricsHandler,
   pathfinderHandler,
   playlistTracksHandler,
   searchHandler,
+  stateStreamHandler,
 } from './routes/proxy.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
@@ -50,6 +52,8 @@ const ROUTES: Route[] = [
   { path: '/api/proxy/library/albums', method: 'GET', handler: libraryAlbumsHandler },
   { path: '/api/proxy/library/tracks', method: 'GET', handler: libraryTracksHandler },
   { path: '/api/proxy/playlist', method: 'GET', handler: playlistTracksHandler },
+  { path: '/api/proxy/state/stream', method: 'GET', handler: stateStreamHandler },
+  { path: '/api/proxy/lyrics', method: 'GET', handler: lyricsHandler },
 ]
 
 export function spotuiSidecar(): Plugin {
@@ -98,7 +102,7 @@ export function spotuiSidecar(): Plugin {
       console.log(
         '[spotui] sidecar mounted: ' +
           '/api/auth/{status,discover,paste,clear,token} + ' +
-          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items} + ' +
+          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items,state/stream,lyrics/:id} + ' +
           '/api/health',
       )
     },

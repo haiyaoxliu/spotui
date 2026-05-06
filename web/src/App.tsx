@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { handleCallback, isLoggedIn, login, logout } from './auth/auth'
 import { api } from './api/client'
+import { subscribeState } from './api/events'
 import { checkLibraryContains, getPlaybackState, getQueue } from './api/spotify'
 import { usePlayer } from './store/player'
 import { useSelection } from './store/selection'
@@ -175,11 +176,18 @@ function Player({ me }: { me: Me }) {
     }
   }, [setPlayback, setQueue])
 
-  // Initial fetch + 3s polling.
+  // Initial fetch + push-driven refresh from the sidecar's dealer SSE.
+  // The 30s fallback polling is a safety net for missed events / SSE
+  // transport hiccups; when SSE is healthy, refreshes happen on each
+  // Spotify state change instead of on a timer.
   useEffect(() => {
     void refresh()
-    const id = setInterval(() => void refresh(), 3000)
-    return () => clearInterval(id)
+    const sub = subscribeState({
+      onTick: () => void refresh(),
+      onReconnect: () => void refresh(),
+      fallbackIntervalMs: 30_000,
+    })
+    return () => sub.close()
   }, [refresh])
 
   // Re-check whether the currently playing track is in Liked Songs whenever

@@ -33,6 +33,9 @@ import {
   connectTransferHandler,
   connectVolumeHandler,
   friendsHandler,
+  jamGetHandler,
+  jamLeaveHandler,
+  jamStartHandler,
   libraryAlbumsHandler,
   libraryPlaylistsHandler,
   libraryTracksHandler,
@@ -76,6 +79,9 @@ const ROUTES: Route[] = [
   { path: '/api/proxy/connect/queue', method: 'POST', handler: connectQueueHandler },
   { path: '/api/proxy/connect/transfer', method: 'POST', handler: connectTransferHandler },
   { path: '/api/proxy/friends', method: 'GET', handler: friendsHandler },
+  { path: '/api/proxy/jam', method: 'GET', handler: jamGetHandler },
+  { path: '/api/proxy/jam/start', method: 'POST', handler: jamStartHandler },
+  { path: '/api/proxy/jam/leave', method: 'POST', handler: jamLeaveHandler },
 ]
 
 export function spotuiSidecar(): Plugin {
@@ -124,7 +130,7 @@ export function spotuiSidecar(): Plugin {
       console.log(
         '[spotui] sidecar mounted: ' +
           '/api/auth/{status,discover,paste,clear,token} + ' +
-          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items,state/stream,lyrics/:id,connect/{play,pause,next,prev,seek,volume,shuffle,repeat,queue,transfer}} + ' +
+          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items,state/stream,lyrics/:id,connect/{play,pause,next,prev,seek,volume,shuffle,repeat,queue,transfer},friends,jam,jam/{start,leave}} + ' +
           '/api/health',
       )
     },

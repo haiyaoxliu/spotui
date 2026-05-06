@@ -11,6 +11,11 @@ import { readFileCookies } from '../cookies/file.js'
 import { fetchBuddylist } from '../spotify/buddylist.js'
 import { connectClient } from '../spotify/connect.js'
 import { getDealer, type DealerEvent } from '../spotify/dealer.js'
+import {
+  getCurrentSession,
+  leaveSession,
+  startSession,
+} from '../spotify/jam.js'
 import { fetchLyrics, LyricsNotFoundError } from '../spotify/lyrics.js'
 import {
   fetchLibraryTracksVariables,
@@ -315,6 +320,67 @@ export const connectTransferHandler = connectWriteHandler<{
   },
   (read, { deviceId, play }) => connectClient.transfer(read, deviceId, play),
 )
+
+/** GET /api/proxy/jam — current jam session (200 with payload), or 404
+ *  body if the user isn't in one. Read-only; does NOT auto-create. */
+export async function jamGetHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await getCurrentSession(read)
+    if (payload === null) {
+      json(res, 404, { error: 'no active jam' })
+      return
+    }
+    json(res, 200, payload)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** POST /api/proxy/jam/start — create a new jam (or return the existing
+ *  one if already in one). The user becomes the owner. */
+export async function jamStartHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const payload = await startSession(read)
+    json(res, 200, payload)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** POST /api/proxy/jam/leave  body: { sessionId } — end (if owner) or
+ *  leave (if participant) the named jam session. */
+export async function jamLeaveHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  let body: { sessionId?: unknown }
+  try {
+    body = (await readJson(req)) as { sessionId?: unknown }
+  } catch (e) {
+    return error(res, 400, `invalid JSON: ${errMsg(e)}`)
+  }
+  if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
+    return error(res, 400, 'expected { sessionId: string }')
+  }
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    await leaveSession(read, body.sessionId)
+    noContent(res)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
 
 /** GET /api/proxy/friends
  *  Recent listening activity for the user's followed friends. Cookie-path

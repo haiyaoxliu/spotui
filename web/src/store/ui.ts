@@ -116,6 +116,12 @@ interface UIState {
   openFriends: () => void
   closeFriends: () => void
   toggleFriends: () => void
+  // Jam (group listening) overlay. Toggle with `J` (shift+j); lowercase
+  // `j` is bound to skipNext.
+  jamOpen: boolean
+  openJam: () => void
+  closeJam: () => void
+  toggleJam: () => void
   // Theme + per-theme color profiles. The active --color-accent and
   // --color-external CSS vars always reflect the current theme's pair, so
   // consumers don't care which profile produced them.
@@ -174,6 +180,10 @@ export const useUI = create<UIState>((set, get) => ({
   openFriends: () => set({ friendsOpen: true }),
   closeFriends: () => set({ friendsOpen: false }),
   toggleFriends: () => set((s) => ({ friendsOpen: !s.friendsOpen })),
+  jamOpen: false,
+  openJam: () => set({ jamOpen: true }),
+  closeJam: () => set({ jamOpen: false }),
+  toggleJam: () => set((s) => ({ jamOpen: !s.jamOpen })),
   theme: initialTheme,
   setTheme: (t) => {
     localStorage.setItem(THEME_KEY, t)

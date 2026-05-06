@@ -31,6 +31,7 @@ import { ControlPane } from './components/ControlPane'
 import { DevicePicker } from './components/DevicePicker'
 import { FriendsOverlay } from './components/FriendsOverlay'
 import { HelpOverlay } from './components/HelpOverlay'
+import { JamOverlay } from './components/JamOverlay'
 import { LibraryPanel } from './components/LibraryPanel'
 import { SelectedPlaylist } from './components/SelectedPlaylist'
 import { RightPanel } from './components/RightPanel'
@@ -136,6 +137,8 @@ function Player({ me }: { me: Me }) {
   const toggleControlPane = useUI((s) => s.toggleControlPane)
   const toggleFriends = useUI((s) => s.toggleFriends)
   const friendsOpen = useUI((s) => s.friendsOpen)
+  const toggleJam = useUI((s) => s.toggleJam)
+  const jamOpen = useUI((s) => s.jamOpen)
   const focusSearch = useUI((s) => s.focusSearch)
   const transportPosition = useUI((s) => s.transportPosition)
   const searchPosition = useUI((s) => s.searchPosition)
@@ -214,7 +217,7 @@ function Player({ me }: { me: Me }) {
     function onKey(e: KeyboardEvent) {
       const target = e.target as Element | null
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
-      if (devicePickerOpen || helpOpen || colorPickerOpen || friendsOpen) return
+      if (devicePickerOpen || helpOpen || colorPickerOpen || friendsOpen || jamOpen) return
       // Don't intercept browser shortcuts. Plain shift is fine — '?' and
       // '+' are reachable as shifted characters and we want those to work.
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -305,6 +308,12 @@ function Player({ me }: { me: Me }) {
           e.preventDefault()
           toggleFriends()
           break
+        case 'J':
+          // Shift+j — Jam overlay. Lowercase `j` stays bound to skipNext;
+          // shift+j opens the group-listening pane.
+          e.preventDefault()
+          toggleJam()
+          break
         case 'b':
           e.preventDefault()
           void goBack()
@@ -318,11 +327,13 @@ function Player({ me }: { me: Me }) {
     helpOpen,
     colorPickerOpen,
     friendsOpen,
+    jamOpen,
     openDevicePicker,
     openHelp,
     openColorPicker,
     toggleControlPane,
     toggleFriends,
+    toggleJam,
     focusSearch,
     goBack,
     refresh,
@@ -336,6 +347,7 @@ function Player({ me }: { me: Me }) {
         onOpenHelp={openHelp}
         onToggleControls={toggleControlPane}
         onToggleFriends={toggleFriends}
+        onToggleJam={toggleJam}
       />
       <main className="flex-1 overflow-hidden flex">
         <LibraryPanel ownerId={me.id} onAfterAction={() => void refresh()} />
@@ -357,6 +369,7 @@ function Player({ me }: { me: Me }) {
       <ColorPicker />
       <ControlPane />
       <FriendsOverlay />
+      <JamOverlay />
     </div>
   )
 }
@@ -372,12 +385,14 @@ function ConsoleBar({
   onOpenHelp,
   onToggleControls,
   onToggleFriends,
+  onToggleJam,
 }: {
   me: Me
   onOpenDevices: () => void
   onOpenHelp: () => void
   onToggleControls: () => void
   onToggleFriends: () => void
+  onToggleJam: () => void
 }) {
   const playback = usePlayer((s) => s.playback)
   const itemName =
@@ -420,6 +435,13 @@ function ConsoleBar({
           aria-label="Friend activity"
         >
           ⚇
+        </ConsoleButton>
+        <ConsoleButton
+          onClick={onToggleJam}
+          title="Jam (shift+j)"
+          aria-label="Jam"
+        >
+          ⚏
         </ConsoleButton>
         <ConsoleButton onClick={onOpenDevices} title="Devices (d)">
           d

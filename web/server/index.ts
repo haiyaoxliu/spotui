@@ -40,9 +40,11 @@ import {
   libraryPlaylistsHandler,
   libraryTracksHandler,
   lyricsHandler,
+  meHandler,
   pathfinderHandler,
   playlistTracksHandler,
   searchHandler,
+  stateSnapshotHandler,
   stateStreamHandler,
 } from './routes/proxy.js'
 
@@ -60,13 +62,17 @@ const ROUTES: Route[] = [
   { path: '/api/auth/paste', method: 'POST', handler: pasteHandler },
   { path: '/api/auth/clear', method: 'DELETE', handler: clearHandler },
   { path: '/api/auth/token', method: 'GET', handler: tokenHandler },
+  { path: '/api/me', method: 'GET', handler: meHandler },
   { path: '/api/proxy/pathfinder', method: 'POST', handler: pathfinderHandler },
   { path: '/api/proxy/search', method: 'GET', handler: searchHandler },
   { path: '/api/proxy/library/playlists', method: 'GET', handler: libraryPlaylistsHandler },
   { path: '/api/proxy/library/albums', method: 'GET', handler: libraryAlbumsHandler },
   { path: '/api/proxy/library/tracks', method: 'GET', handler: libraryTracksHandler },
   { path: '/api/proxy/playlist', method: 'GET', handler: playlistTracksHandler },
+  // /state/stream MUST be registered before /state — Connect's prefix
+  // matching means /state would otherwise swallow /state/stream requests.
   { path: '/api/proxy/state/stream', method: 'GET', handler: stateStreamHandler },
+  { path: '/api/proxy/state', method: 'GET', handler: stateSnapshotHandler },
   { path: '/api/proxy/lyrics', method: 'GET', handler: lyricsHandler },
   { path: '/api/proxy/connect/play', method: 'POST', handler: connectPlayHandler },
   { path: '/api/proxy/connect/pause', method: 'POST', handler: connectPauseHandler },

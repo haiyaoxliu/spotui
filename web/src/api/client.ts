@@ -1,4 +1,4 @@
-import { getAccessToken, refresh } from '../auth/auth'
+import { clearCookieToken, getAccessToken, isCookieMode, refresh } from '../auth/auth'
 
 const API_BASE = 'https://api.spotify.com/v1'
 
@@ -20,7 +20,12 @@ export async function api<T = unknown>(
 
   let res = await send(token)
   if (res.status === 401) {
-    token = await refresh()
+    if (isCookieMode()) {
+      clearCookieToken()
+      token = (await getAccessToken()) ?? ''
+    } else {
+      token = await refresh()
+    }
     res = await send(token)
   }
   if (res.status === 204) return null

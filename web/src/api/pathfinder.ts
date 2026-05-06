@@ -106,6 +106,31 @@ interface PfPlaylist {
 
 const PROXY_SEARCH_URL = '/api/proxy/search'
 
+/** Error thrown when a sidecar/Pathfinder call fails. `status` is the HTTP
+ *  code from the sidecar (or 0 for transport-layer failures). Callers use
+ *  `isRetryablePathfinderError` to decide whether to fall through to /v1. */
+export class PathfinderError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = 'PathfinderError'
+  }
+}
+
+/** Treat 429 and pure transport failures as "try the public Web API."
+ *  GraphQL errors / 4xx responses are bugs in the proxy or query and won't
+ *  be helped by /v1 — let those propagate so we notice. Mirrors spogo's
+ *  `auto` engine `shouldFallback` predicate. */
+export function isRetryablePathfinderError(e: unknown): boolean {
+  if (e instanceof PathfinderError) {
+    return e.status === 0 || e.status === 429 || e.status >= 500
+  }
+  // Native fetch transport failures throw plain TypeError ("Failed to fetch").
+  return e instanceof TypeError
+}
+
 /** Fetch search results via Pathfinder. Throws on transport / sidecar errors;
  *  callers should catch and fall back to the public Web API. */
 export async function searchViaPathfinder(
@@ -121,11 +146,17 @@ export async function searchViaPathfinder(
   const res = await fetch(`${PROXY_SEARCH_URL}?${params.toString()}`)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`pathfinder search ${res.status}: ${truncate(text)}`)
+    throw new PathfinderError(
+      `pathfinder search ${res.status}: ${truncate(text)}`,
+      res.status,
+    )
   }
   const envelope = (await res.json()) as PathfinderEnvelope
   if (envelope.errors && envelope.errors.length > 0) {
-    throw new Error(envelope.errors[0].message ?? 'pathfinder error')
+    throw new PathfinderError(
+      envelope.errors[0].message ?? 'pathfinder error',
+      200,
+    )
   }
   return adaptSearchV2(envelope.data?.searchV2)
 }
@@ -510,7 +541,7 @@ export async function fetchLibraryEntries(opts: {
   })
   if (expanded.length > 0) params.set('expanded', expanded.join(','))
   const res = await fetch(`/api/proxy/library/playlists?${params}`)
-  if (!res.ok) throw new Error(`library playlists ${res.status}`)
+  if (!res.ok) throw new PathfinderError(`library playlists ${res.status}`, res.status)
   const env = (await res.json()) as { data?: { me?: { libraryV3?: LibraryV3Page } } }
   const page = env.data?.me?.libraryV3
   const entries = (page?.items ?? []).flatMap((it) => {
@@ -598,7 +629,7 @@ async function libraryTracksViaPathfinder(
 ): Promise<PageSlice<SavedTrack>> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   const res = await fetch(`/api/proxy/library/tracks?${params}`)
-  if (!res.ok) throw new Error(`library tracks ${res.status}`)
+  if (!res.ok) throw new PathfinderError(`library tracks ${res.status}`, res.status)
   const env = (await res.json()) as {
     data?: { me?: { library?: { tracks?: LibraryTracksPage } } }
   }
@@ -695,7 +726,7 @@ async function playlistTracksViaPathfinder(
   const res = await fetch(
     `/api/proxy/playlist/${encodeURIComponent(playlistId)}/items?${params}`,
   )
-  if (!res.ok) throw new Error(`playlist items ${res.status}`)
+  if (!res.ok) throw new PathfinderError(`playlist items ${res.status}`, res.status)
   const env = (await res.json()) as { data?: { playlistV2?: PlaylistV2WithOwner } }
   const pl = env.data?.playlistV2
   const items = (pl?.content?.items ?? []).flatMap((it) => {
@@ -763,5 +794,141 @@ function mapEpisode(e: PfEpisodePartial): Episode | null {
     uri: e.uri,
     duration_ms: e.duration?.totalMilliseconds ?? 0,
     type: 'episode',
+  }
+}
+
+// ============================================================
+// Album tracks (getAlbum)
+// ============================================================
+
+interface GetAlbumPayload {
+  data?: {
+    albumUnion?: {
+      tracks?: {
+        totalCount?: number
+        items?: GetAlbumTrackItem[]
+      }
+    }
+  }
+  errors?: { message?: string }[]
+}
+
+interface GetAlbumTrackItem {
+  uid?: string
+  track?: PfTrack & { trackNumber?: number; discNumber?: number }
+}
+
+export interface SimplifiedAlbumTrack {
+  id: string
+  name: string
+  uri: string
+  duration_ms: number
+  artists: { id: string; name: string; uri: string }[]
+  type: 'track'
+}
+
+/** Fetch all tracks of an album via Pathfinder's `getAlbum`. Mirrors what
+ *  the public /v1/albums/{id}/tracks returns (SimplifiedTrack — no album
+ *  field) so existing callers don't need reshaping. Pages internally up to
+ *  `max`. */
+export async function fetchAlbumTracksViaPathfinder(
+  albumId: string,
+  max = 200,
+): Promise<SimplifiedAlbumTrack[]> {
+  const out: SimplifiedAlbumTrack[] = []
+  const limit = 50
+  let offset = 0
+  while (out.length < max) {
+    const page = await getAlbumPage(albumId, limit, offset)
+    const items = page.data?.albumUnion?.tracks?.items ?? []
+    if (items.length === 0) break
+    for (const it of items) {
+      const m = mapAlbumTrack(it.track)
+      if (m) out.push(m)
+      if (out.length >= max) break
+    }
+    const total = page.data?.albumUnion?.tracks?.totalCount ?? out.length
+    offset += items.length
+    if (offset >= total) break
+  }
+  return out
+}
+
+async function getAlbumPage(
+  albumId: string,
+  limit: number,
+  offset: number,
+): Promise<GetAlbumPayload> {
+  const res = await fetch('/api/proxy/pathfinder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      operation: 'getAlbum',
+      variables: {
+        uri: `spotify:album:${albumId}`,
+        locale: '',
+        offset,
+        limit,
+      },
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`getAlbum ${res.status}: ${truncate(text)}`)
+  }
+  const env = (await res.json()) as GetAlbumPayload
+  if (env.errors && env.errors.length > 0) {
+    throw new Error(env.errors[0].message ?? 'getAlbum failed')
+  }
+  return env
+}
+
+function mapAlbumTrack(
+  t: (PfTrack & { trackNumber?: number; discNumber?: number }) | undefined,
+): SimplifiedAlbumTrack | null {
+  if (!t?.uri || !t.name) return null
+  return {
+    id: t.id ?? idFromUri(t.uri),
+    name: t.name,
+    uri: t.uri,
+    duration_ms:
+      t.duration?.totalMilliseconds ?? t.trackDuration?.totalMilliseconds ?? 0,
+    artists: mapArtistsContainer(t.artists),
+    type: 'track',
+  }
+}
+
+// ============================================================
+// Mutations (addToPlaylist)
+// ============================================================
+
+/** Append tracks to a playlist via Pathfinder's `addToPlaylist` mutation.
+ *  Mirrors spogo's connect-state behavior; spogo defaults to TOP_OF_PLAYLIST
+ *  but we use BOTTOM_OF_PLAYLIST to match the public Web API's append
+ *  semantics that callers already rely on. */
+export async function addToPlaylistViaPathfinder(
+  playlistId: string,
+  uris: string[],
+): Promise<void> {
+  if (uris.length === 0) return
+  const res = await fetch('/api/proxy/pathfinder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      operation: 'addToPlaylist',
+      variables: {
+        playlistUri: `spotify:playlist:${playlistId}`,
+        playlistItemUris: uris,
+        newPosition: { moveType: 'BOTTOM_OF_PLAYLIST', fromUid: null },
+      },
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`addToPlaylist ${res.status}: ${truncate(text)}`)
+  }
+  const env = (await res.json()) as { errors?: { message?: string }[] }
+  if (env.errors && env.errors.length > 0) {
+    throw new Error(env.errors[0].message ?? 'addToPlaylist failed')
   }
 }

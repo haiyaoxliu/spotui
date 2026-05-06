@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { handleCallback, isLoggedIn, login, logout } from './auth/auth'
+import { bootstrapAuth, handleCallback, login, logout } from './auth/auth'
 import { api } from './api/client'
+import { fetchMe } from './api/me'
 import { subscribeState } from './api/events'
 import { checkLibraryContains, getPlaybackState, getQueue } from './api/spotify'
 import { usePlayer } from './store/player'
@@ -61,12 +62,14 @@ export function App() {
           if (!callbackInflight) callbackInflight = handleCallback()
           await callbackInflight
         }
-        if (isLoggedIn()) {
-          const data = await api<Me>('/me')
-          if (!cancelled && data) {
-            setMe(data)
-            useUI.getState().setUserId(data.id)
-          }
+        const kind = await bootstrapAuth()
+        if (kind === 'none') return
+        // Cookie mode → sidecar's cached /api/me (1 hit per dev-server
+        // lifetime). PKCE mode → public /v1/me with the OAuth bearer.
+        const data = kind === 'cookie' ? await fetchMe() : await api<Me>('/me')
+        if (!cancelled && data) {
+          setMe(data)
+          useUI.getState().setUserId(data.id)
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))

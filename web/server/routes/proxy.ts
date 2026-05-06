@@ -17,6 +17,7 @@ import {
   startSession,
 } from '../spotify/jam.js'
 import { fetchLyrics, LyricsNotFoundError } from '../spotify/lyrics.js'
+import { getMe, MeRateLimitedError } from '../spotify/me.js'
 import {
   fetchLibraryTracksVariables,
   fetchPlaylistVariables,
@@ -24,6 +25,7 @@ import {
   pathfinderQuery,
   searchDesktopVariables,
 } from '../spotify/pathfinder.js'
+import { fetchClusterSnapshot } from '../spotify/state.js'
 
 interface PathfinderBody {
   operation?: unknown
@@ -378,6 +380,48 @@ export async function jamLeaveHandler(
     await leaveSession(read, body.sessionId)
     noContent(res)
   } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** GET /api/proxy/state — single connect-state pull mapped to the public
+ *  Web API shapes the SPA already consumes. Replaces three /v1 calls
+ *  (`/me/player`, `/me/player/queue`, `/me/player/devices`) with one
+ *  cookie-host call. Snapshot only — push notifications still arrive on
+ *  /api/proxy/state/stream. */
+export async function stateSnapshotHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const snapshot = await fetchClusterSnapshot(read)
+    json(res, 200, snapshot)
+  } catch (e) {
+    error(res, 502, errMsg(e))
+  }
+}
+
+/** GET /api/me — cached /v1/me. Once successful, the result is cached in
+ *  memory + ~/Library/Application Support/spotui/me.json so a restart
+ *  doesn't re-hit /v1. On 429, returns 429 with Retry-After (in seconds)
+ *  and skips retries for 60s, since hammering the rate-limited endpoint
+ *  only makes the cooldown longer. */
+export async function meHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const read = await loadCookies()
+  if (!read) return error(res, 401, 'no cookies')
+  try {
+    const profile = await getMe(read)
+    json(res, 200, profile)
+  } catch (e) {
+    if (e instanceof MeRateLimitedError) {
+      res.setHeader('Retry-After', String(Math.ceil(e.retryAfterMs / 1000)))
+      return error(res, 429, 'api.spotify.com rate-limited /v1/me; try again shortly')
+    }
     error(res, 502, errMsg(e))
   }
 }

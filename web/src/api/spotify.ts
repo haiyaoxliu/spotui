@@ -1,4 +1,6 @@
 import { api } from './client'
+import { isCookieMode } from '../auth/auth'
+import { fetchClusterSnapshot } from './state'
 import {
   connectNext,
   connectPause,
@@ -13,9 +15,12 @@ import {
   tryConnect,
 } from './connect'
 import {
+  addToPlaylistViaPathfinder,
   buildPathfinderNextUrl,
+  fetchAlbumTracksViaPathfinder,
   fetchPageViaPathfinder,
   isPathfinderNextUrl,
+  isRetryablePathfinderError,
   searchMoreViaPathfinder,
   searchViaPathfinder,
 } from './pathfinder'
@@ -88,10 +93,24 @@ export interface Queue {
 }
 
 export async function getPlaybackState(): Promise<PlaybackState | null> {
+  if (isCookieMode()) {
+    try {
+      return (await fetchClusterSnapshot()).playback
+    } catch (e) {
+      console.warn('[spotui] connect-state snapshot failed, falling back:', e)
+    }
+  }
   return api<PlaybackState>('/me/player')
 }
 
 export async function getQueue(): Promise<Queue | null> {
+  if (isCookieMode()) {
+    try {
+      return (await fetchClusterSnapshot()).queue
+    } catch (e) {
+      console.warn('[spotui] connect-state queue failed, falling back:', e)
+    }
+  }
   return api<Queue>('/me/player/queue')
 }
 
@@ -181,14 +200,17 @@ export interface PageSlice<T> {
   total: number | null
 }
 export async function fetchPage<T>(path: string): Promise<PageSlice<T>> {
-  // Cookie/Pathfinder path first; transparently falls back to public Web
-  // API on transport / sidecar / Spotify error so callers don't have to
-  // know which backend served them.
-  try {
-    const slice = await fetchPageViaPathfinder<T>(path)
-    if (slice) return slice
-  } catch (e) {
-    console.warn('[spotui] pathfinder fetchPage failed, falling back:', e)
+  // Cookie/Pathfinder path first; falls back to public Web API only on
+  // 429 / network errors (mirrors spogo's `auto` engine). GraphQL errors
+  // surface so we notice schema drift instead of silently DDOSing /v1.
+  if (isCookieMode()) {
+    try {
+      const slice = await fetchPageViaPathfinder<T>(path)
+      if (slice) return slice
+    } catch (e) {
+      if (!isRetryablePathfinderError(e)) throw e
+      console.warn('[spotui] pathfinder fetchPage rate-limited/transport, falling back:', e)
+    }
   }
   const page = await api<Page<T>>(path)
   if (!page) return { items: [], nextPath: null, total: null }
@@ -219,9 +241,22 @@ interface SimplifiedAlbumTrack {
 }
 
 export async function getAlbumTracks(albumId: string, max = 200): Promise<SimplifiedAlbumTrack[]> {
+  if (isCookieMode()) {
+    try {
+      return await fetchAlbumTracksViaPathfinder(albumId, max)
+    } catch (e) {
+      console.warn('[spotui] pathfinder getAlbum failed, falling back:', e)
+    }
+  }
   return fetchAllPages<SimplifiedAlbumTrack>(`/albums/${albumId}/tracks?limit=50`, max)
 }
 
+// Stays on /v1 — spogo doesn't implement a connect-state path either, and
+// the official Pathfinder op name isn't documented. Low risk of triggering
+// rate limits because this only fires when the user opens the recently-
+// played view, not on every page load. If this becomes a problem, the spclient
+// `recently-played-tracks/v3/user-listening-history-tracks` endpoint is the
+// next thing to try.
 export async function getRecentlyPlayed(): Promise<PlayHistoryItem[]> {
   const page = await api<CursorPage<PlayHistoryItem>>('/me/player/recently-played?limit=50')
   return page?.items ?? []
@@ -269,13 +304,17 @@ const SEARCH_LIMIT = 50
 export async function search(q: string): Promise<SearchResults> {
   const trimmed = q.trim()
   if (!trimmed) return {}
-  // Cookie/Pathfinder path first; public Web API fallback if the sidecar
-  // is unreachable or Spotify rejected our cookie.
-  try {
-    const pf = await searchViaPathfinder(trimmed, SEARCH_LIMIT, 0)
-    return synthesizeNexts(trimmed, pf)
-  } catch (e) {
-    console.warn('[spotui] pathfinder search failed, falling back:', e)
+  // Cookie/Pathfinder path first; only fall back to /v1 on 429 / network
+  // errors so a Pathfinder schema drift doesn't quietly redirect every
+  // search to the rate-limited public API.
+  if (isCookieMode()) {
+    try {
+      const pf = await searchViaPathfinder(trimmed, SEARCH_LIMIT, 0)
+      return synthesizeNexts(trimmed, pf)
+    } catch (e) {
+      if (!isRetryablePathfinderError(e)) throw e
+      console.warn('[spotui] pathfinder search rate-limited/transport, falling back:', e)
+    }
   }
   const params = new URLSearchParams({
     q: trimmed,
@@ -297,7 +336,8 @@ export async function searchMore<K extends SearchTab>(
       if (!result) return null
       return result.slice as SearchResults[K]
     } catch (e) {
-      console.warn('[spotui] pathfinder searchMore failed, falling back:', e)
+      if (!isRetryablePathfinderError(e)) throw e
+      console.warn('[spotui] pathfinder searchMore rate-limited/transport, falling back:', e)
       // Can't translate a synthetic URL into a public-API URL, so fall
       // through to a fresh public-API page as a best-effort backstop.
     }
@@ -346,6 +386,13 @@ function withNext<T extends { items: unknown[]; total: number; next?: string | n
 }
 
 export async function getDevices(): Promise<Device[]> {
+  if (isCookieMode()) {
+    try {
+      return (await fetchClusterSnapshot()).devices
+    } catch (e) {
+      console.warn('[spotui] connect-state devices failed, falling back:', e)
+    }
+  }
   const res = await api<{ devices: Device[] }>('/me/player/devices')
   return res?.devices ?? []
 }
@@ -483,35 +530,72 @@ export async function seek(positionMs: number, deviceId?: string): Promise<void>
 
 // ---------- Library save/remove (unified /me/library) ----------
 
+// Per-URI cache for /me/library/contains. App.tsx re-runs the contains
+// check on every track change, so without this we'd hit /v1/me/library
+// on every skip — the public Web API is the rate-limited host. Cache is
+// a Map<uri, boolean> populated on read and updated on save/remove.
+const libraryContainsCache = new Map<string, boolean>()
+
 export async function saveToLibrary(uris: string[]): Promise<void> {
   if (uris.length === 0) return
   const params = new URLSearchParams({ uris: uris.join(',') })
   await api(`/me/library?${params.toString()}`, { method: 'PUT' })
+  for (const uri of uris) libraryContainsCache.set(uri, true)
 }
 
 export async function removeFromLibrary(uris: string[]): Promise<void> {
   if (uris.length === 0) return
   const params = new URLSearchParams({ uris: uris.join(',') })
   await api(`/me/library?${params.toString()}`, { method: 'DELETE' })
+  for (const uri of uris) libraryContainsCache.set(uri, false)
 }
 
 export async function checkLibraryContains(uris: string[]): Promise<boolean[]> {
   if (uris.length === 0) return []
-  const params = new URLSearchParams({ uris: uris.join(',') })
-  const res = await api<boolean[]>(`/me/library/contains?${params.toString()}`)
-  return res ?? []
+  // Slot every URI: known values come from the cache; misses get a single
+  // batched /v1 call. Preserves caller order.
+  const result: (boolean | null)[] = uris.map((uri) =>
+    libraryContainsCache.has(uri) ? (libraryContainsCache.get(uri) as boolean) : null,
+  )
+  const missingIndices: number[] = []
+  const missingUris: string[] = []
+  result.forEach((v, i) => {
+    if (v === null) {
+      missingIndices.push(i)
+      missingUris.push(uris[i])
+    }
+  })
+  if (missingUris.length > 0) {
+    const params = new URLSearchParams({ uris: missingUris.join(',') })
+    const fetched = (await api<boolean[]>(
+      `/me/library/contains?${params.toString()}`,
+    )) ?? []
+    missingIndices.forEach((idx, k) => {
+      const v = fetched[k] ?? false
+      libraryContainsCache.set(uris[idx], v)
+      result[idx] = v
+    })
+  }
+  return result.map((v) => v ?? false)
 }
 
 // ---------- Playlist mutation ----------
 
-// Spec line 1232 (operationId: add-items-to-playlist) — the canonical add
-// endpoint. The legacy POST /playlists/{id}/tracks (line 998) is deprecated.
-// Max 100 URIs per call.
+// Cookie path: Pathfinder `addToPlaylist` mutation (no /v1 traffic).
+// PKCE path: legacy POST /v1/playlists/{id}/items (max 100 URIs/call).
 export async function addItemsToPlaylist(
   playlistId: string,
   uris: string[],
 ): Promise<void> {
   if (uris.length === 0) return
+  if (isCookieMode()) {
+    try {
+      await addToPlaylistViaPathfinder(playlistId, uris)
+      return
+    } catch (e) {
+      console.warn('[spotui] pathfinder addToPlaylist failed, falling back:', e)
+    }
+  }
   const params = new URLSearchParams({ uris: uris.join(',') })
   await api(`/playlists/${playlistId}/items?${params.toString()}`, {
     method: 'POST',

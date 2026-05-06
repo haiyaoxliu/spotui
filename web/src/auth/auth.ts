@@ -30,6 +30,74 @@ interface Tokens {
 
 const TOKEN_KEY = 'spotify_tokens'
 
+// Cookie-auth bootstrap state. When the sidecar reports `mode: "cookie"`,
+// we mint bearers from `/api/auth/token` instead of running the PKCE flow.
+// `bootstrapAuth()` populates this on app start; the rest of the auth
+// surface (`getAccessToken`, `isLoggedIn`) consults it before falling
+// through to PKCE.
+let cookieMode = false
+interface CookieToken {
+  accessToken: string
+  expiresAt: number
+}
+let cookieToken: CookieToken | null = null
+
+interface AuthStatus {
+  mode: 'cookie' | 'none'
+  source: string | null
+  tokenExpiresAt: number | null
+  clientId: string | null
+}
+
+export type AuthKind = 'cookie' | 'pkce' | 'none'
+
+export async function bootstrapAuth(): Promise<AuthKind> {
+  try {
+    let status = await fetchStatus('/api/auth/status')
+    if (status?.mode === 'none') {
+      // No on-disk cookies — try Safari auto-discovery once.
+      const discovered = await fetchStatus('/api/auth/discover', { method: 'POST' })
+      if (discovered?.mode === 'cookie') status = discovered
+    }
+    if (status?.mode === 'cookie') {
+      cookieMode = true
+      return 'cookie'
+    }
+  } catch {
+    // Sidecar unreachable — fall through to PKCE.
+  }
+  return loadTokens() ? 'pkce' : 'none'
+}
+
+async function fetchStatus(path: string, init?: RequestInit): Promise<AuthStatus | null> {
+  const res = await fetch(path, init)
+  if (!res.ok) return null
+  return (await res.json()) as AuthStatus
+}
+
+async function getCookieToken(): Promise<string> {
+  if (cookieToken && Date.now() < cookieToken.expiresAt - 60_000) {
+    return cookieToken.accessToken
+  }
+  const res = await fetch('/api/auth/token')
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`/api/auth/token: ${res.status} ${body}`)
+  }
+  cookieToken = (await res.json()) as CookieToken
+  return cookieToken.accessToken
+}
+
+export function isCookieMode(): boolean {
+  return cookieMode
+}
+
+/** Drop the cached cookie bearer so the next call re-mints via the sidecar.
+ *  Used on 401 from api.spotify.com to recover from token rotation. */
+export function clearCookieToken(): void {
+  cookieToken = null
+}
+
 function requireClientId(): string {
   if (!CLIENT_ID) {
     throw new Error(
@@ -145,6 +213,7 @@ export async function refresh(): Promise<string> {
 }
 
 export async function getAccessToken(): Promise<string | null> {
+  if (cookieMode) return getCookieToken()
   const tokens = loadTokens()
   if (!tokens) return null
   if (Date.now() >= tokens.expires_at - 60_000) return refresh()
@@ -152,7 +221,7 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 export function isLoggedIn(): boolean {
-  return loadTokens() !== null
+  return cookieMode || loadTokens() !== null
 }
 
 export function logout(): void {

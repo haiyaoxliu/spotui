@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { discoverCookies, type CookieReadResult } from '../cookies/index.js'
 import { hasSpDc } from '../cookies/types.js'
 import { readFileCookies } from '../cookies/file.js'
+import { connectClient } from '../spotify/connect.js'
 import { getDealer, type DealerEvent } from '../spotify/dealer.js'
 import { fetchLyrics, LyricsNotFoundError } from '../spotify/lyrics.js'
 import {
@@ -177,6 +178,143 @@ export async function playlistTracksHandler(
   }
 }
 
+// ---- connect-state writes ---------------------------------------------
+
+/** Build a generic POST handler that pulls cookies, decodes a typed body,
+ *  hands off to a connect-client method, and returns 204 / surfaces the
+ *  Spotify error verbatim. */
+function connectWriteHandler<T>(
+  parseBody: (raw: unknown) => T | string,
+  invoke: (read: CookieReadResult, body: T) => Promise<void>,
+) {
+  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let raw: unknown
+    try {
+      raw = await readJson(req)
+    } catch (e) {
+      return error(res, 400, `invalid JSON: ${errMsg(e)}`)
+    }
+    const parsed = parseBody(raw)
+    if (typeof parsed === 'string') return error(res, 400, parsed)
+    const read = await loadCookies()
+    if (!read) return error(res, 401, 'no cookies')
+    try {
+      await invoke(read, parsed)
+      noContent(res)
+    } catch (e) {
+      error(res, 502, errMsg(e))
+    }
+  }
+}
+
+export const connectPlayHandler = connectWriteHandler<{
+  contextUri?: string
+  offsetUri?: string
+  uri?: string
+  positionMs?: number
+}>(
+  (raw) => {
+    const r = (raw ?? {}) as Record<string, unknown>
+    const isOptStr = (v: unknown): v is string | undefined =>
+      v === undefined || typeof v === 'string'
+    const isOptNum = (v: unknown): v is number | undefined =>
+      v === undefined || typeof v === 'number'
+    if (
+      !isOptStr(r.contextUri) ||
+      !isOptStr(r.offsetUri) ||
+      !isOptStr(r.uri) ||
+      !isOptNum(r.positionMs)
+    ) {
+      return 'expected { contextUri?, offsetUri?, uri?, positionMs? }'
+    }
+    return {
+      contextUri: r.contextUri,
+      offsetUri: r.offsetUri,
+      uri: r.uri,
+      positionMs: r.positionMs,
+    }
+  },
+  (read, args) => connectClient.play(read, args),
+)
+
+export const connectPauseHandler = connectWriteHandler<Record<never, never>>(
+  () => ({}),
+  (read) => connectClient.pause(read),
+)
+
+export const connectNextHandler = connectWriteHandler<Record<never, never>>(
+  () => ({}),
+  (read) => connectClient.next(read),
+)
+
+export const connectPrevHandler = connectWriteHandler<Record<never, never>>(
+  () => ({}),
+  (read) => connectClient.previous(read),
+)
+
+export const connectSeekHandler = connectWriteHandler<{ positionMs: number }>(
+  (raw) => {
+    const r = raw as Record<string, unknown>
+    if (typeof r.positionMs !== 'number') return 'expected { positionMs: number }'
+    return { positionMs: r.positionMs }
+  },
+  (read, { positionMs }) => connectClient.seek(read, positionMs),
+)
+
+export const connectVolumeHandler = connectWriteHandler<{ percent: number }>(
+  (raw) => {
+    const r = raw as Record<string, unknown>
+    if (typeof r.percent !== 'number') return 'expected { percent: number }'
+    return { percent: r.percent }
+  },
+  (read, { percent }) => connectClient.volume(read, percent),
+)
+
+export const connectShuffleHandler = connectWriteHandler<{ state: boolean }>(
+  (raw) => {
+    const r = raw as Record<string, unknown>
+    if (typeof r.state !== 'boolean') return 'expected { state: boolean }'
+    return { state: r.state }
+  },
+  (read, { state }) => connectClient.shuffle(read, state),
+)
+
+export const connectRepeatHandler = connectWriteHandler<{
+  mode: 'off' | 'track' | 'context'
+}>(
+  (raw) => {
+    const r = raw as Record<string, unknown>
+    if (r.mode !== 'off' && r.mode !== 'track' && r.mode !== 'context') {
+      return 'expected { mode: "off" | "track" | "context" }'
+    }
+    return { mode: r.mode }
+  },
+  (read, { mode }) => connectClient.repeat(read, mode),
+)
+
+export const connectQueueHandler = connectWriteHandler<{ uri: string }>(
+  (raw) => {
+    const r = raw as Record<string, unknown>
+    if (typeof r.uri !== 'string' || r.uri.length === 0)
+      return 'expected { uri: string }'
+    return { uri: r.uri }
+  },
+  (read, { uri }) => connectClient.queueAdd(read, uri),
+)
+
+export const connectTransferHandler = connectWriteHandler<{
+  deviceId: string
+  play: boolean
+}>(
+  (raw) => {
+    const r = raw as Record<string, unknown>
+    if (typeof r.deviceId !== 'string' || r.deviceId.length === 0)
+      return 'expected { deviceId: string, play?: boolean }'
+    return { deviceId: r.deviceId, play: r.play === true }
+  },
+  (read, { deviceId, play }) => connectClient.transfer(read, deviceId, play),
+)
+
 /** GET /api/proxy/lyrics/:trackId
  *  Returns spclient color-lyrics payload, or 404 when Spotify has no
  *  lyrics for that track. Mounted at the `/api/proxy/lyrics` prefix. */
@@ -283,6 +421,11 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(body))
+}
+
+function noContent(res: ServerResponse): void {
+  res.statusCode = 204
+  res.end()
 }
 
 function error(res: ServerResponse, status: number, message: string): void {

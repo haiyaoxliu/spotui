@@ -22,6 +22,16 @@ import {
   tokenHandler,
 } from './routes/auth.js'
 import {
+  connectNextHandler,
+  connectPauseHandler,
+  connectPlayHandler,
+  connectPrevHandler,
+  connectQueueHandler,
+  connectRepeatHandler,
+  connectSeekHandler,
+  connectShuffleHandler,
+  connectTransferHandler,
+  connectVolumeHandler,
   libraryAlbumsHandler,
   libraryPlaylistsHandler,
   libraryTracksHandler,
@@ -54,6 +64,16 @@ const ROUTES: Route[] = [
   { path: '/api/proxy/playlist', method: 'GET', handler: playlistTracksHandler },
   { path: '/api/proxy/state/stream', method: 'GET', handler: stateStreamHandler },
   { path: '/api/proxy/lyrics', method: 'GET', handler: lyricsHandler },
+  { path: '/api/proxy/connect/play', method: 'POST', handler: connectPlayHandler },
+  { path: '/api/proxy/connect/pause', method: 'POST', handler: connectPauseHandler },
+  { path: '/api/proxy/connect/next', method: 'POST', handler: connectNextHandler },
+  { path: '/api/proxy/connect/prev', method: 'POST', handler: connectPrevHandler },
+  { path: '/api/proxy/connect/seek', method: 'POST', handler: connectSeekHandler },
+  { path: '/api/proxy/connect/volume', method: 'POST', handler: connectVolumeHandler },
+  { path: '/api/proxy/connect/shuffle', method: 'POST', handler: connectShuffleHandler },
+  { path: '/api/proxy/connect/repeat', method: 'POST', handler: connectRepeatHandler },
+  { path: '/api/proxy/connect/queue', method: 'POST', handler: connectQueueHandler },
+  { path: '/api/proxy/connect/transfer', method: 'POST', handler: connectTransferHandler },
 ]
 
 export function spotuiSidecar(): Plugin {
@@ -102,7 +122,7 @@ export function spotuiSidecar(): Plugin {
       console.log(
         '[spotui] sidecar mounted: ' +
           '/api/auth/{status,discover,paste,clear,token} + ' +
-          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items,state/stream,lyrics/:id} + ' +
+          '/api/proxy/{pathfinder,search,library/{playlists,albums,tracks},playlist/:id/items,state/stream,lyrics/:id,connect/{play,pause,next,prev,seek,volume,shuffle,repeat,queue,transfer}} + ' +
           '/api/health',
       )
     },

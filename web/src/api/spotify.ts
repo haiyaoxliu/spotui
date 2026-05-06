@@ -1,5 +1,18 @@
 import { api } from './client'
 import {
+  connectNext,
+  connectPause,
+  connectPlay,
+  connectPrev,
+  connectQueueAdd,
+  connectRepeat,
+  connectSeek,
+  connectShuffle,
+  connectTransfer,
+  connectVolume,
+  tryConnect,
+} from './connect'
+import {
   buildPathfinderNextUrl,
   fetchPageViaPathfinder,
   isPathfinderNextUrl,
@@ -83,9 +96,14 @@ export async function getQueue(): Promise<Queue | null> {
 }
 
 export async function addToQueue(uri: string, deviceId?: string): Promise<void> {
-  const params = new URLSearchParams({ uri })
-  if (deviceId) params.set('device_id', deviceId)
-  await api(`/me/player/queue?${params.toString()}`, { method: 'POST' })
+  await tryConnect(
+    () => connectQueueAdd(uri),
+    async () => {
+      const params = new URLSearchParams({ uri })
+      if (deviceId) params.set('device_id', deviceId)
+      await api(`/me/player/queue?${params.toString()}`, { method: 'POST' })
+    },
+  )
 }
 
 // ---------- Library / playlists ----------
@@ -330,12 +348,16 @@ export async function getDevices(): Promise<Device[]> {
   return res?.devices ?? []
 }
 
-export async function transferPlayback(deviceId: string): Promise<void> {
-  await api('/me/player', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_ids: [deviceId] }),
-  })
+export async function transferPlayback(deviceId: string, play = false): Promise<void> {
+  await tryConnect(
+    () => connectTransfer(deviceId, play),
+    () =>
+      api('/me/player', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: [deviceId], play }),
+      }),
+  )
 }
 
 export interface PlayOptions {
@@ -348,6 +370,29 @@ export interface PlayOptions {
 }
 
 export async function play(opts: PlayOptions = {}): Promise<void> {
+  const { contextUri, uris, offsetUri, offsetPosition, positionMs } = opts
+  // Connect-state path handles resume, single-context, single-track, and
+  // contextUri+offsetUri. Multi-URI ad-hoc lists and offsetPosition (numeric
+  // index) fall back to the public Web API which has richer semantics.
+  const multi = !!uris && uris.length > 1
+  const usesPosition = offsetPosition != null
+  if (!multi && !usesPosition) {
+    const single = uris && uris.length === 1 ? uris[0] : undefined
+    return tryConnect(
+      () =>
+        connectPlay({
+          contextUri,
+          offsetUri,
+          uri: single,
+          positionMs: positionMs ?? undefined,
+        }),
+      () => publicPlay(opts),
+    )
+  }
+  return publicPlay(opts)
+}
+
+async function publicPlay(opts: PlayOptions): Promise<void> {
   const { deviceId, contextUri, uris, offsetUri, offsetPosition, positionMs } = opts
   const path = deviceId ? `/me/player/play?device_id=${deviceId}` : '/me/player/play'
   const body: Record<string, unknown> = {}
@@ -356,7 +401,6 @@ export async function play(opts: PlayOptions = {}): Promise<void> {
   if (offsetUri) body.offset = { uri: offsetUri }
   else if (offsetPosition != null) body.offset = { position: offsetPosition }
   if (positionMs != null) body.position_ms = positionMs
-
   const init: RequestInit = { method: 'PUT' }
   if (Object.keys(body).length > 0) {
     init.headers = { 'Content-Type': 'application/json' }
@@ -366,47 +410,73 @@ export async function play(opts: PlayOptions = {}): Promise<void> {
 }
 
 export async function pause(deviceId?: string): Promise<void> {
-  const path = deviceId ? `/me/player/pause?device_id=${deviceId}` : '/me/player/pause'
-  await api(path, { method: 'PUT' })
+  await tryConnect(connectPause, async () => {
+    const path = deviceId ? `/me/player/pause?device_id=${deviceId}` : '/me/player/pause'
+    await api(path, { method: 'PUT' })
+  })
 }
 
 export async function next(deviceId?: string): Promise<void> {
-  const path = deviceId ? `/me/player/next?device_id=${deviceId}` : '/me/player/next'
-  await api(path, { method: 'POST' })
+  await tryConnect(connectNext, async () => {
+    const path = deviceId ? `/me/player/next?device_id=${deviceId}` : '/me/player/next'
+    await api(path, { method: 'POST' })
+  })
 }
 
 export async function previous(deviceId?: string): Promise<void> {
-  const path = deviceId ? `/me/player/previous?device_id=${deviceId}` : '/me/player/previous'
-  await api(path, { method: 'POST' })
+  await tryConnect(connectPrev, async () => {
+    const path = deviceId ? `/me/player/previous?device_id=${deviceId}` : '/me/player/previous'
+    await api(path, { method: 'POST' })
+  })
 }
 
 export async function setShuffle(state: boolean, deviceId?: string): Promise<void> {
-  const params = new URLSearchParams({ state: String(state) })
-  if (deviceId) params.set('device_id', deviceId)
-  await api(`/me/player/shuffle?${params.toString()}`, { method: 'PUT' })
+  await tryConnect(
+    () => connectShuffle(state),
+    async () => {
+      const params = new URLSearchParams({ state: String(state) })
+      if (deviceId) params.set('device_id', deviceId)
+      await api(`/me/player/shuffle?${params.toString()}`, { method: 'PUT' })
+    },
+  )
 }
 
 export async function setRepeat(
   state: 'off' | 'context' | 'track',
   deviceId?: string,
 ): Promise<void> {
-  const params = new URLSearchParams({ state })
-  if (deviceId) params.set('device_id', deviceId)
-  await api(`/me/player/repeat?${params.toString()}`, { method: 'PUT' })
+  await tryConnect(
+    () => connectRepeat(state),
+    async () => {
+      const params = new URLSearchParams({ state })
+      if (deviceId) params.set('device_id', deviceId)
+      await api(`/me/player/repeat?${params.toString()}`, { method: 'PUT' })
+    },
+  )
 }
 
 export async function setVolume(percent: number, deviceId?: string): Promise<void> {
   const clamped = Math.max(0, Math.min(100, Math.round(percent)))
-  const params = new URLSearchParams({ volume_percent: String(clamped) })
-  if (deviceId) params.set('device_id', deviceId)
-  await api(`/me/player/volume?${params.toString()}`, { method: 'PUT' })
+  await tryConnect(
+    () => connectVolume(clamped),
+    async () => {
+      const params = new URLSearchParams({ volume_percent: String(clamped) })
+      if (deviceId) params.set('device_id', deviceId)
+      await api(`/me/player/volume?${params.toString()}`, { method: 'PUT' })
+    },
+  )
 }
 
 export async function seek(positionMs: number, deviceId?: string): Promise<void> {
   const ms = Math.max(0, Math.round(positionMs))
-  const params = new URLSearchParams({ position_ms: String(ms) })
-  if (deviceId) params.set('device_id', deviceId)
-  await api(`/me/player/seek?${params.toString()}`, { method: 'PUT' })
+  await tryConnect(
+    () => connectSeek(ms),
+    async () => {
+      const params = new URLSearchParams({ position_ms: String(ms) })
+      if (deviceId) params.set('device_id', deviceId)
+      await api(`/me/player/seek?${params.toString()}`, { method: 'PUT' })
+    },
+  )
 }
 
 // ---------- Library save/remove (unified /me/library) ----------

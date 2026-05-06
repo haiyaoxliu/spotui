@@ -161,7 +161,7 @@ export function SelectedPlaylist({
                       : `${count} track${count === 1 ? '' : 's'}`,
                 )
                 if (totalDurationMs != null) parts.push(formatDurationLong(totalDurationMs))
-                if (minAddedAt) parts.push(`since ${minAddedAt.slice(0, 7)}`)
+                if (minAddedAt) parts.push(minAddedAt.slice(0, 7))
                 return parts.join(' · ')
               })()}
             </p>

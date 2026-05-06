@@ -2,6 +2,7 @@ mod app;
 mod auth;
 mod cache;
 mod config;
+mod cookie;
 mod diag;
 mod jam;
 mod jam_net;

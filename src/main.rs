@@ -8,6 +8,7 @@ mod jam;
 mod jam_net;
 mod spotify;
 mod ui;
+mod web;
 
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
@@ -17,6 +18,13 @@ async fn main() -> Result<()> {
     let paths = config::Paths::resolve()?;
     config::ensure_dirs(&paths)?;
     init_logging(&paths)?;
+
+    // `spotui serve` runs the merged binary's web side. Phase 0 brings up
+    // an axum server bound to the Tailscale interface; the TUI loop will
+    // run alongside it in a later phase.
+    if std::env::args().nth(1).as_deref() == Some("serve") {
+        return web::run().await;
+    }
 
     let cfg = match config::load_or_create(&paths) {
         Ok(c) => c,

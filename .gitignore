@@ -19,3 +19,6 @@ JAM_PLAN.md
 
 # Local copy of the Spotify Web API OpenAPI spec (reference only)
 spotify-openapi.local.yaml
+
+# Claude Code per-machine memory (do not commit)
+/memory
